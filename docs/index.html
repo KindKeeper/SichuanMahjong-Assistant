@@ -14,6 +14,7 @@ h1 { font-size: 1.15rem; margin: 6px 0 10px; }
 .suit-row { display: flex; gap: 4px; margin: 5px 0; align-items: center; }
 .suit-label { width: 1.4em; font-weight: 600; color: #555; }
 .tile { flex: 1; padding: 10px 0; font-size: 1rem; border: 1px solid #ccc; border-radius: 8px; background: #fff; cursor: pointer; }
+.tile.face { font-size: 1.35rem; line-height: 1.25; padding: 6px 0; }
 .tile:active { background: #e8f0fe; }
 .hand { display: flex; flex-wrap: wrap; gap: 5px; min-height: 44px; padding: 6px; background: #eef1f4; border-radius: 8px; }
 .hand .tile { flex: 0 0 auto; padding: 8px 12px; }
@@ -116,6 +117,11 @@ def analyze_json(s):
   }
 }
 
+function tileFace(t){ // Unicode 麻将牌面：条 0x1F019 起，饼 0x1F010 起，万 0x1F007 起
+  const base = t < 9 ? 0x1F019 : t < 18 ? 0x1F010 : 0x1F007;
+  return String.fromCodePoint(base + (t % 9));
+}
+
 function renderTiles(){
   const el = document.getElementById("tiles");
   el.innerHTML = "";
@@ -128,7 +134,7 @@ function renderTiles(){
     for (let r = 0; r < 9; r++){
       const t = s * 9 + r;
       const b = document.createElement("button");
-      b.className = "tile"; b.textContent = RANKS[r];
+      b.className = "tile face"; b.textContent = tileFace(t); b.title = SUITS[s] + RANKS[r];
       b.onclick = () => {
         const n = hand.filter(x => x === t).length;
         if (hand.length < 14 && n < 4) { hand.push(t); hand.sort((a,b)=>a-b); render(); }
@@ -144,7 +150,7 @@ function render(){
   h.innerHTML = "";
   hand.forEach((t, i) => {
     const b = document.createElement("button");
-    b.className = "tile"; b.textContent = TILE_STR[t];
+    b.className = "tile face"; b.textContent = tileFace(t); b.title = TILE_STR[t];
     b.onclick = () => { hand.splice(i, 1); render(); };
     h.appendChild(b);
   });
@@ -177,7 +183,7 @@ async function analyze(){
 function show(data, ms){
   document.getElementById("result").style.display = "block";
   const r = data.recommend;
-  const dtxt = r.discard != null ? ` · 建议切 ${TILE_STR[r.discard]}` : "";
+  const dtxt = r.discard != null ? ` · 建议切 ${tileFace(r.discard)}（${TILE_STR[r.discard]}）` : "";
   document.getElementById("banner").innerHTML =
     `推荐：<span style="color:${PLAN_CSS[r.plan]}">${PLAN_CN[r.plan]}</span>（EV ${r.ev.toFixed(2)}）${dtxt}`;
   document.getElementById("latency").textContent =
@@ -189,7 +195,7 @@ function show(data, ms){
     const best = p.plan === r.plan;
     const card = document.createElement("div");
     card.className = "plan-card" + (best ? " best" : "");
-    const d = p.discard != null ? `切 ${TILE_STR[p.discard]}` : `向听 ${p.shanten}`;
+    const d = p.discard != null ? `切 ${tileFace(p.discard)}（${TILE_STR[p.discard]}）` : `向听 ${p.shanten}`;
     card.innerHTML = `
       <div class="plan-head">
         <span style="color:${PLAN_CSS[p.plan]}">${PLAN_CN[p.plan]}${best ? " ★" : ""}</span>
