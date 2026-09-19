@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>川麻助手 v0 · PWA</title>
+<style>
+:root { --n:#4c78a8; --d:#f58518; --q:#54a24b; --f:#b279a2; --bg:#f6f7f9; }
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; background: var(--bg); color: #222; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 12px; }
+h1 { font-size: 1.15rem; margin: 6px 0 10px; }
+.section { background: #fff; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.suit-row { display: flex; gap: 4px; margin: 5px 0; align-items: center; }
+.suit-label { width: 1.4em; font-weight: 600; color: #555; }
+.tile { flex: 1; padding: 10px 0; font-size: 1rem; border: 1px solid #ccc; border-radius: 8px; background: #fff; cursor: pointer; }
+.tile:active { background: #e8f0fe; }
+.hand { display: flex; flex-wrap: wrap; gap: 5px; min-height: 44px; padding: 6px; background: #eef1f4; border-radius: 8px; }
+.hand .tile { flex: 0 0 auto; padding: 8px 12px; }
+.row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+select, button { padding: 10px 14px; font-size: 1rem; border-radius: 8px; border: 1px solid #bbb; background: #fff; }
+button.primary { background: #4c78a8; color: #fff; border: none; font-weight: 600; flex: 1; }
+button:disabled { opacity: .5; }
+.banner { font-size: 1.05rem; font-weight: 700; padding: 10px; border-radius: 8px; background: #e8f0fe; margin-bottom: 8px; }
+.plan-card { border-left: 5px solid #ccc; background: #fafafa; border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.plan-card.best { background: #f0f7ee; }
+.plan-head { display: flex; justify-content: space-between; font-weight: 600; flex-wrap: wrap; gap: 4px; }
+.bar-wrap { background: #e3e6ea; border-radius: 4px; height: 14px; margin: 6px 0; overflow: hidden; }
+.bar { height: 100%; border-radius: 4px; }
+.meta { color: #777; font-size: .85rem; }
+#loading { position: fixed; inset: 0; background: rgba(255,255,255,.92); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; z-index: 9; }
+.spin { width: 34px; height: 34px; border: 4px solid #dbe4ee; border-top-color: #4c78a8; border-radius: 50%; animation: r 1s linear infinite; }
+@keyframes r { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="loading"><div class="spin"></div><div id="loadmsg">引擎加载中（首次约 5MB，请稍候）…</div></div>
+<div class="wrap">
+  <h1>🀄 川麻助手 v0 <span class="meta">PWA · 牌效 + 迷你 EV</span></h1>
+
+  <div class="section">
+    <div id="tiles"></div>
+    <div class="row">
+      <span class="meta">手牌 <b id="count">0</b>/14（点牌加入，点手牌移除）</span>
+      <button onclick="clearHand()">清空</button>
+    </div>
+    <div class="hand" id="hand"></div>
+  </div>
+
+  <div class="section">
+    <div class="row">
+      <label>定缺
+        <select id="que">
+          <option value="">自动</option>
+          <option value="0">条</option>
+          <option value="1">饼</option>
+          <option value="2">万</option>
+        </select>
+      </label>
+      <label>精度
+        <select id="k">
+          <option value="20" selected>快(20)</option>
+          <option value="40">标准(40)</option>
+          <option value="100">精(100)</option>
+        </select>
+      </label>
+    </div>
+    <button class="primary" id="go" onclick="analyze()" disabled>引擎加载中…</button>
+    <div class="meta" id="latency"></div>
+  </div>
+
+  <div class="section" id="result" style="display:none">
+    <div class="banner" id="banner"></div>
+    <div id="plans"></div>
+    <div class="meta">口径：v1.9 引擎（碰杠开 / 官方累加计分 / 哑对手）· EV=每手期望分（和牌+杠租）</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+const SUITS = ["条","饼","万"];
+const RANKS = ["一","二","三","四","五","六","七","八","九"];
+const TILE_STR = [];
+for (let s = 0; s < 3; s++) for (let r = 0; r < 9; r++) TILE_STR.push(SUITS[s] + RANKS[r]);
+const PLAN_CN = {normal:"平胡", dazi:"大对子", qidui:"七对", flush:"清一色"};
+const PLAN_CSS = {normal:"var(--n)", dazi:"var(--d)", qidui:"var(--q)", flush:"var(--f)"};
+let hand = [];
+let pyodideReady = false;
+
+async function boot(){
+  try {
+    const pyodide = await loadPyodide();
+    window._py = pyodide;
+    document.getElementById("loadmsg").textContent = "解包引擎中…";
+    const buf = await (await fetch("mahjong.zip")).arrayBuffer();
+    pyodide.unpackArchive(new Uint8Array(buf), "zip");
+    pyodide.runPython(`
+import sys, json
+for p in ("/", ".", "/home/pyodide"):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+from mahjong.assistant import analyze as _analyze
+
+def analyze_json(s):
+    d = json.loads(s)
+    r = _analyze([int(t) for t in d["tiles"]], d.get("que"), int(d.get("k", 20)))
+    return json.dumps(r, ensure_ascii=False)
+`);
+    window._analyzeJson = pyodide.globals.get("analyze_json");
+    pyodideReady = true;
+    document.getElementById("go").disabled = false;
+    document.getElementById("go").textContent = "分析";
+    document.getElementById("loading").style.display = "none";
+  } catch (e) {
+    document.getElementById("loadmsg").textContent = "加载失败：" + e.message + "（请检查网络后刷新）";
+  }
+}
+
+function renderTiles(){
+  const el = document.getElementById("tiles");
+  el.innerHTML = "";
+  for (let s = 0; s < 3; s++){
+    const row = document.createElement("div");
+    row.className = "suit-row";
+    const lab = document.createElement("span");
+    lab.className = "suit-label"; lab.textContent = SUITS[s];
+    row.appendChild(lab);
+    for (let r = 0; r < 9; r++){
+      const t = s * 9 + r;
+      const b = document.createElement("button");
+      b.className = "tile"; b.textContent = RANKS[r];
+      b.onclick = () => {
+        const n = hand.filter(x => x === t).length;
+        if (hand.length < 14 && n < 4) { hand.push(t); hand.sort((a,b)=>a-b); render(); }
+      };
+      row.appendChild(b);
+    }
+    el.appendChild(row);
+  }
+}
+
+function render(){
+  const h = document.getElementById("hand");
+  h.innerHTML = "";
+  hand.forEach((t, i) => {
+    const b = document.createElement("button");
+    b.className = "tile"; b.textContent = TILE_STR[t];
+    b.onclick = () => { hand.splice(i, 1); render(); };
+    h.appendChild(b);
+  });
+  document.getElementById("count").textContent = hand.length;
+}
+
+function clearHand(){ hand = []; render(); document.getElementById("result").style.display = "none"; }
+
+async function analyze(){
+  if (!pyodideReady) return;
+  if (hand.length < 13) { alert("请先输入 13~14 张手牌"); return; }
+  const btn = document.getElementById("go");
+  btn.disabled = true; btn.textContent = "计算中…";
+  const t0 = performance.now();
+  try {
+    const payload = JSON.stringify({
+      tiles: hand,
+      que: document.getElementById("que").value === "" ? null : +document.getElementById("que").value,
+      k: +document.getElementById("k").value
+    });
+    const data = JSON.parse(window._analyzeJson(payload));
+    show(data, performance.now() - t0);
+  } catch (e) {
+    alert("分析失败：" + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "分析";
+  }
+}
+
+function show(data, ms){
+  document.getElementById("result").style.display = "block";
+  const r = data.recommend;
+  const dtxt = r.discard != null ? ` · 建议切 ${TILE_STR[r.discard]}` : "";
+  document.getElementById("banner").innerHTML =
+    `推荐：<span style="color:${PLAN_CSS[r.plan]}">${PLAN_CN[r.plan]}</span>（EV ${r.ev.toFixed(2)}）${dtxt}`;
+  document.getElementById("latency").textContent =
+    `结构：对子×${data.features.n_pairs} 强门 ${data.features.n_max} 张 · 定缺${SUITS[data.que]} · 耗时 ${ms.toFixed(0)}ms`;
+  const maxEv = Math.max(...data.plans.map(p => p.ev), 0.01);
+  const box = document.getElementById("plans");
+  box.innerHTML = "";
+  data.plans.forEach(p => {
+    const best = p.plan === r.plan;
+    const card = document.createElement("div");
+    card.className = "plan-card" + (best ? " best" : "");
+    const d = p.discard != null ? `切 ${TILE_STR[p.discard]}` : `向听 ${p.shanten}`;
+    card.innerHTML = `
+      <div class="plan-head">
+        <span style="color:${PLAN_CSS[p.plan]}">${PLAN_CN[p.plan]}${best ? " ★" : ""}</span>
+        <span>EV ${p.ev.toFixed(2)} ｜ 胡牌率 ${(p.win_rate*100).toFixed(0)}% ｜ ${d}</span>
+      </div>
+      <div class="bar-wrap"><div class="bar" style="width:${Math.max(2, p.ev/maxEv*100)}%;background:${PLAN_CSS[p.plan]}"></div></div>`;
+    box.appendChild(card);
+  });
+  document.getElementById("result").scrollIntoView({behavior:"smooth"});
+}
+
+renderTiles(); render(); boot();
+</script>
+</body>
+</html>
