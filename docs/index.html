@@ -117,8 +117,8 @@ def analyze_json(s):
   }
 }
 
-function tileFace(t){ // Unicode 麻将牌面：条 0x1F019 起，饼 0x1F010 起，万 0x1F007 起
-  const base = t < 9 ? 0x1F019 : t < 18 ? 0x1F010 : 0x1F007;
+function tileFace(t){ // Unicode 麻将牌面：条 0x1F010 起，饼 0x1F019 起，万 0x1F007 起
+  const base = t < 9 ? 0x1F010 : t < 18 ? 0x1F019 : 0x1F007;
   return String.fromCodePoint(base + (t % 9));
 }
 
