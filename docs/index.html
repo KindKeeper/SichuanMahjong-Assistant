@@ -148,7 +148,7 @@ async function boot(){
     const pyodide = await loadPyodide();
     window._py = pyodide;
     document.getElementById("loadmsg").textContent = "解包引擎中…";
-    const buf = await (await fetch("mahjong.zip?v=921c-2979e30d")).arrayBuffer();
+    const buf = await (await fetch("mahjong.zip?v=941b-a4074c54")).arrayBuffer();
     pyodide.unpackArchive(new Uint8Array(buf), "zip");
     pyodide.runPython(`
 import sys, json
