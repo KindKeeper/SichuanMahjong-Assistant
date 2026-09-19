@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>川麻助手 v0 · PWA</title>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 <style>
 :root { --n:#4c78a8; --d:#f58518; --q:#54a24b; --f:#b279a2; --bg:#f6f7f9; }
 * { box-sizing: border-box; }
@@ -26,21 +27,31 @@ button:disabled { opacity: .5; }
 .banner { font-size: 1.05rem; font-weight: 700; padding: 10px; border-radius: 8px; background: #e8f0fe; margin-bottom: 8px; }
 .plan-card { border-left: 5px solid #ccc; background: #fafafa; border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
 .plan-card.best { background: #f0f7ee; }
-.plan-head { display: flex; justify-content: space-between; font-weight: 600; flex-wrap: wrap; gap: 4px; }
+.plan-head { display: flex; justify-content: space-between; font-weight: 600; }
 .bar-wrap { background: #e3e6ea; border-radius: 4px; height: 14px; margin: 6px 0; overflow: hidden; }
 .bar { height: 100%; border-radius: 4px; }
 .meta { color: #777; font-size: .85rem; }
 #loading { position: fixed; inset: 0; background: rgba(255,255,255,.92); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; z-index: 9; }
 .spin { width: 34px; height: 34px; border: 4px solid #dbe4ee; border-top-color: #4c78a8; border-radius: 50%; animation: r 1s linear infinite; }
 @keyframes r { to { transform: rotate(360deg); } }
+.plan-name { font-weight: 700; }
 </style>
 </head>
 <body>
 <div id="loading"><div class="spin"></div><div id="loadmsg">引擎加载中（首次约 5MB，请稍候）…</div></div>
 <div class="wrap">
-  <h1>🀄 川麻助手 v0 <span class="meta">PWA · 牌效 + 迷你 EV</span></h1>
+  <h1>🀄 川麻助手 v0 <span class="meta">牌效 + 迷你 EV</span></h1>
 
   <div class="section">
+    <div class="row">
+      <span class="meta">录入到：</span>
+      <select id="target">
+        <option value="hand">我的手牌</option>
+        <option value="0">下家牌河</option>
+        <option value="1">对家牌河</option>
+        <option value="2">上家牌河</option>
+      </select>
+    </div>
     <div id="tiles"></div>
     <div class="row">
       <span class="meta">手牌 <b id="count">0/14</b>（点牌加入，点手牌移除；张数随副露自动调整）</span>
@@ -51,7 +62,13 @@ button:disabled { opacity: .5; }
 
   <div class="section">
     <div class="row">
-      <span class="meta">副露（已碰/杠，可选）：</span>
+      <span class="meta">副露（碰/杠，按归属座位）：</span>
+      <select id="meldSeat">
+        <option value="me">我</option>
+        <option value="0">下家</option>
+        <option value="1">对家</option>
+        <option value="2">上家</option>
+      </select>
       <select id="meldTile"></select>
       <select id="meldKind">
         <option value="peng">碰</option>
@@ -61,7 +78,23 @@ button:disabled { opacity: .5; }
       <button onclick="addMeld()">添加</button>
     </div>
     <div class="hand" id="melds"></div>
-    <div class="meta">添加副露后，手牌数自动按规则减少（碰 −3、杠 −4+1）。</div>
+    <div class="meta">我的手牌数随副露自动调整（碰 −3、杠 −4+1）。</div>
+  </div>
+
+  <div class="section">
+    <div class="meta">牌河：选好"录入到"后按出牌顺序点牌；每行可撤回/清空：</div>
+    <div id="rivers"></div>
+  </div>
+
+  <div class="section">
+    <div class="row">
+      <span class="meta">读牌（实验）三家定缺：</span>
+      <select id="que0"><option value="">下家自动</option><option value="0">条</option><option value="1">饼</option><option value="2">万</option></select>
+      <select id="que1"><option value="">对家自动</option><option value="0">条</option><option value="1">饼</option><option value="2">万</option></select>
+      <select id="que2"><option value="">上家自动</option><option value="0">条</option><option value="1">饼</option><option value="2">万</option></select>
+    </div>
+    <button class="primary" id="inferBtn" onclick="infer()" disabled>读牌：推断三家手牌</button>
+    <div id="inferResult"></div>
   </div>
 
   <div class="section">
@@ -76,8 +109,8 @@ button:disabled { opacity: .5; }
       </label>
       <label>精度
         <select id="k">
-          <option value="20" selected>快(20)</option>
-          <option value="40">标准(40)</option>
+          <option value="20">快(20)</option>
+          <option value="40" selected>标准(40)</option>
           <option value="100">精(100)</option>
         </select>
       </label>
@@ -93,7 +126,6 @@ button:disabled { opacity: .5; }
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 <script>
 const SUITS = ["条","饼","万"];
 const RANKS = ["一","二","三","四","五","六","七","八","九"];
@@ -103,53 +135,17 @@ const PLAN_CN = {normal:"平胡", dazi:"大对子", qidui:"七对", flush:"清�
 const PLAN_CSS = {normal:"var(--n)", dazi:"var(--d)", qidui:"var(--q)", flush:"var(--f)"};
 let hand = [];
 let melds = [];
+let oppMelds = [[], [], []];
+let rivers = [[], [], []];
 let pyodideReady = false;
-
-function initMeldSelect(){
-  const sel = document.getElementById("meldTile");
-  sel.innerHTML = "";
-  for (let t = 0; t < 27; t++){
-    const o = document.createElement("option");
-    o.value = t; o.textContent = tileFace(t) + " " + TILE_STR[t];
-    sel.appendChild(o);
-  }
-}
-
-function addMeld(){
-  if (melds.length >= 4) { alert("副露不超过 4 组"); return; }
-  const tile = +document.getElementById("meldTile").value;
-  const kind = document.getElementById("meldKind").value;
-  melds.push({tile, kind});
-  renderMelds();
-}
-
-function renderMelds(){
-  const box = document.getElementById("melds");
-  box.innerHTML = "";
-  const KIND_CN = {peng: "碰", gang: "明杠", angang: "暗杠"};
-  melds.forEach((m, i) => {
-    const b = document.createElement("button");
-    b.className = "tile face";
-    b.textContent = tileFace(m.tile);
-    b.title = KIND_CN[m.kind] + " " + TILE_STR[m.tile];
-    const tag = document.createElement("span");
-    tag.textContent = KIND_CN[m.kind];
-    tag.style.cssText = "font-size:.7rem;color:#666;margin-right:4px";
-    const wrap = document.createElement("span");
-    wrap.style.cssText = "display:inline-flex;align-items:center;background:#e8f0fe;border-radius:8px;padding:2px 4px;margin:2px";
-    wrap.appendChild(tag); wrap.appendChild(b);
-    wrap.onclick = () => { melds.splice(i, 1); renderMelds(); };
-    box.appendChild(wrap);
-  });
-  render(); // 副露变化 → 应持张数变化 → 刷新计数
-}
+const SEAT_CN = ["下家", "对家", "上家"];
 
 async function boot(){
   try {
     const pyodide = await loadPyodide();
     window._py = pyodide;
     document.getElementById("loadmsg").textContent = "解包引擎中…";
-    const buf = await (await fetch("mahjong.zip?v=941b-a4074c54")).arrayBuffer();
+    const buf = await (await fetch("mahjong.zip?v=9e4e-e6fd1268")).arrayBuffer();
     pyodide.unpackArchive(new Uint8Array(buf), "zip");
     pyodide.runPython(`
 import sys, json
@@ -157,23 +153,132 @@ for p in ("/", ".", "/home/pyodide"):
     if p not in sys.path:
         sys.path.insert(0, p)
 from mahjong.assistant import analyze as _analyze
+from mahjong.belief import infer_summary as _infer_summary
+from mahjong.tiles import counts_of as _counts_of
+
+def _melds(ms):
+    return [(m["kind"], int(m["tile"])) for m in ms]
 
 def analyze_json(s):
     d = json.loads(s)
     r = _analyze([int(t) for t in d["tiles"]], d.get("que"), int(d.get("k", 20)),
-                 melds=[(m["kind"], int(m["tile"])) for m in d.get("melds", [])])
+                 melds=_melds(d.get("melds", [])))
+    return json.dumps(r, ensure_ascii=False)
+
+def infer_json(s):
+    d = json.loads(s)
+    r = _infer_summary(_counts_of([int(t) for t in d["tiles"]]), _melds(d.get("melds", [])),
+                       [[int(t) for t in rv] for rv in d.get("rivers", [[], [], []])],
+                       [_melds(ms) for ms in d.get("opp_melds", [[], [], []])],
+                       d.get("ques", [None, None, None]),
+                       k=int(d.get("k", 600)))
     return json.dumps(r, ensure_ascii=False)
 `);
     window._analyzeJson = pyodide.globals.get("analyze_json");
+    window._inferJson = pyodide.globals.get("infer_json");
     pyodideReady = true;
     document.getElementById("go").disabled = false;
     document.getElementById("go").textContent = "分析";
+    document.getElementById("inferBtn").disabled = false;
     document.getElementById("loading").style.display = "none";
   } catch (e) {
     document.getElementById("loadmsg").textContent = "加载失败：" + e.message + "（请检查网络后刷新）";
   }
 }
 
+function routeTile(t){
+  const target = document.getElementById("target").value;
+  if (target === "hand") {
+    const n = hand.filter(x => x === t).length;
+    if (hand.length < expectedIdle() + 1 && n < 4) { hand.push(t); hand.sort((a,b)=>a-b); render(); }
+  } else {
+    const seat = +target;
+    const visible = rivers[seat].filter(x => x === t).length + hand.filter(x => x === t).length
+      + melds.filter(m => m.tile === t).length * 3;
+    if (rivers[seat].length >= 40) { alert("该家牌河过长"); return; }
+    rivers[seat].push(t);
+    renderRivers();
+  }
+}
+
+function initMeldSelect(){
+  const sel = document.getElementById("meldTile");
+  sel.innerHTML = "";
+  for (let t = 0; t < 27; t++){
+    const o = document.createElement("option");
+    o.value = t; o.textContent = tileFace(t) + " " + tileName(t);
+    sel.appendChild(o);
+  }
+}
+
+function addMeld(){
+  const seat = document.getElementById("meldSeat").value;
+  const tile = +document.getElementById("meldTile").value;
+  const kind = document.getElementById("meldKind").value;
+  if (seat === "me") {
+    if (melds.length >= 4) { alert("自家副露不超过 4 组"); return; }
+    melds.push({tile, kind});
+  } else {
+    const s = +seat;
+    if (oppMelds[s].length >= 4) { alert("该家副露不超过 4 组"); return; }
+    oppMelds[s].push({tile, kind});
+  }
+  renderMelds();
+}
+
+function renderMelds(){
+  const box = document.getElementById("melds");
+  box.innerHTML = "";
+  const KIND_CN = {peng: "碰", gang: "明杠", angang: "暗杠"};
+  const addOne = (m, owner, arr) => {
+    const b = document.createElement("button");
+    b.className = "tile face";
+    b.textContent = tileFace(m.tile);
+    b.title = owner + KIND_CN[m.kind] + " " + tileName(m.tile);
+    const tag = document.createElement("span");
+    tag.textContent = owner + KIND_CN[m.kind];
+    tag.style.cssText = "font-size:.7rem;color:#666;margin-right:4px";
+    const wrap = document.createElement("span");
+    wrap.style.cssText = "display:inline-flex;align-items:center;background:#e8f0fe;border-radius:8px;padding:2px 4px;margin:2px";
+    wrap.appendChild(tag); wrap.appendChild(b);
+    wrap.onclick = () => { arr.splice(arr.indexOf(m), 1); renderMelds(); };
+    box.appendChild(wrap);
+  };
+  melds.forEach(m => addOne(m, "我", melds));
+  oppMelds.forEach((ms, s) => ms.forEach(m => addOne(m, SEAT_CN[s], ms)));
+  render();
+}
+
+function renderRivers(){
+  const box = document.getElementById("rivers");
+  box.innerHTML = "";
+  rivers.forEach((rv, s) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    const lab = document.createElement("span");
+    lab.className = "meta";
+    lab.textContent = SEAT_CN[s] + "（" + rv.length + "）：";
+    row.appendChild(lab);
+    rv.forEach(t => {
+      const b = document.createElement("button");
+      b.className = "tile face";
+      b.textContent = tileFace(t);
+      b.title = tileName(t);
+      b.style.padding = "2px 6px";
+      row.appendChild(b);
+    });
+    const undo = document.createElement("button");
+    undo.textContent = "撤回";
+    undo.onclick = () => { rv.pop(); renderRivers(); };
+    const clr = document.createElement("button");
+    clr.textContent = "清空";
+    clr.onclick = () => { rivers[s] = []; renderRivers(); };
+    row.appendChild(undo); row.appendChild(clr);
+    box.appendChild(row);
+  });
+}
+
+function tileName(t){ return TILE_STR[t]; }
 function tileFace(t){ // Unicode 麻将牌面：条 0x1F010 起，饼 0x1F019 起，万 0x1F007 起
   const base = t < 9 ? 0x1F010 : t < 18 ? 0x1F019 : 0x1F007;
   return String.fromCodePoint(base + (t % 9));
@@ -191,12 +296,10 @@ function renderTiles(){
     for (let r = 0; r < 9; r++){
       const t = s * 9 + r;
       const b = document.createElement("button");
+      b.className = "tile";
       b.className = "tile face"; b.textContent = tileFace(t); b.title = SUITS[s] + RANKS[r];
       b.dataset.tile = t;
-      b.onclick = () => {
-        const n = hand.filter(x => x === t).length;
-        if (hand.length < expectedIdle() + 1 && n < 4) { hand.push(t); hand.sort((a,b)=>a-b); render(); }
-      };
+      b.onclick = () => routeTile(t);
       row.appendChild(b);
     }
     el.appendChild(row);
@@ -214,16 +317,64 @@ function render(){
   h.innerHTML = "";
   hand.forEach((t, i) => {
     const b = document.createElement("button");
-    b.className = "tile face"; b.textContent = tileFace(t); b.title = TILE_STR[t];
+    b.className = "tile face"; b.textContent = tileFace(t); b.title = tileName(t);
     b.onclick = () => { hand.splice(i, 1); render(); };
     h.appendChild(b);
   });
   document.getElementById("count").textContent = hand.length + "/" + (expectedIdle() + 1);
 }
 
-function clearHand(){ hand = []; melds = []; render(); renderMelds(); document.getElementById("result").style.display = "none";
+async function infer(){
+  if (!pyodideReady) return;
+  const idle = expectedIdle();
+  if (hand.length !== idle && hand.length !== idle + 1) {
+    alert(`含当前副露应持 ${idle} 张手牌（刚摸牌则 ${idle + 1} 张），当前 ${hand.length} 张`); return;
+  }
+  const btn = document.getElementById("inferBtn");
+  btn.disabled = true; btn.textContent = "推断中…";
+  try {
+    const qv = i => { const v = document.getElementById("que" + i).value; return v === "" ? null : +v; };
+    const payload = JSON.stringify({tiles: hand, melds, opp_melds: oppMelds, rivers, ques: [qv(0), qv(1), qv(2)], k: 600});
+    const data = JSON.parse(window._inferJson(payload));
+    renderInfer(data);
+  } catch (e) {
+    alert("读牌失败：" + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "读牌：推断三家手牌";
+  }
+}
+
+function renderInfer(data){
+  const box = document.getElementById("inferResult");
+  box.innerHTML = "";
+  data.opponents.forEach((r, s) => {
+    const card = document.createElement("div");
+    card.className = "plan-card";
+    const maxE = Math.max(...r.top.map(x => x.exp), 0.01);
+    const topHtml = r.top.map(x =>
+      '<span style="display:inline-flex;flex-direction:column;align-items:center;margin-right:6px">' +
+      '<span style="font-size:1.3rem">' + tileFace(x.tile) + '</span>' +
+      '<span class="meta">' + x.exp + '</span>' +
+      '<span style="width:34px;height:' + Math.max(2, x.exp/maxE*30) + 'px;background:#4c78a8;display:block;border-radius:2px"></span></span>'
+    ).join("");
+    const mapHtml = r.map_hand.map(t => '<span style="font-size:1.2rem">' + tileFace(t) + '</span>').join("");
+    card.innerHTML = '<div class="plan-head"><span>' + SEAT_CN[s] + ' 最可能持牌</span>' +
+      '<span class="meta">MAP权重 ' + r.map_weight + ' ｜ 有效样本 ' + r.neff + '</span></div>' +
+      '<div style="margin:6px 0">' + topHtml + '</div>' +
+      '<div class="meta">MAP 手牌：' + mapHtml + '</div>';
+    box.appendChild(card);
+  });
+  box.scrollIntoView({behavior:"smooth"});
+}
+
+function clearHand(){
+  hand = []; melds = []; oppMelds = [[], [], []]; rivers = [[], [], []];
+  render(); renderMelds(); renderRivers();
+  document.getElementById("result").style.display = "none";
+  document.getElementById("inferResult").innerHTML = "";
   document.querySelectorAll("#tiles .tile").forEach(el => el.classList.remove("hot"));
-  try { localStorage.removeItem("mj_state"); } catch (e) {} }
+  try { localStorage.removeItem("mj_state"); } catch (e) {}
+}
 
 async function analyze(){
   if (!pyodideReady) return;
@@ -235,12 +386,7 @@ async function analyze(){
   btn.disabled = true; btn.textContent = "计算中…";
   const t0 = performance.now();
   try {
-    const payload = JSON.stringify({
-      tiles: hand,
-      que: document.getElementById("que").value === "" ? null : +document.getElementById("que").value,
-      k: +document.getElementById("k").value,
-      melds: melds
-    });
+    const payload = JSON.stringify({tiles: hand, que: document.getElementById("que").value === "" ? null : +document.getElementById("que").value, k: +document.getElementById("k").value, melds: melds});
     const data = JSON.parse(window._analyzeJson(payload));
     show(data, performance.now() - t0);
   } catch (e) {
@@ -253,11 +399,10 @@ async function analyze(){
 function show(data, ms){
   document.getElementById("result").style.display = "block";
   const r = data.recommend;
-  const dtxt = r.discard != null ? ` · 建议切 ${tileFace(r.discard)}（${TILE_STR[r.discard]}）` : "";
+  const dtxt = r.discard != null ? ` · 建议切 ${tileFace(r.discard)}（${tileName(r.discard)}）` : "";
   document.getElementById("banner").innerHTML =
     `推荐：<span style="color:${PLAN_CSS[r.plan]}">${PLAN_CN[r.plan]}</span>（EV ${r.ev.toFixed(2)}）${dtxt}`;
-  document.getElementById("latency").textContent =
-    `结构：对子×${data.features.n_pairs} 强门 ${data.features.n_max} 张 · 定缺${SUITS[data.que]} · 耗时 ${ms.toFixed(0)}ms`;
+  document.getElementById("latency").textContent = `结构：对子×${data.features.n_pairs} 强门 ${data.features.n_max} 张 · 定缺${SUITS[data.que]} · 耗时 ${ms.toFixed(0)}ms`;
   const maxEv = Math.max(...data.plans.map(p => p.ev), 0.01);
   const box = document.getElementById("plans");
   box.innerHTML = "";
@@ -265,18 +410,18 @@ function show(data, ms){
     const best = p.plan === r.plan;
     const card = document.createElement("div");
     card.className = "plan-card" + (best ? " best" : "");
-    const d = p.discard != null ? `切 ${tileFace(p.discard)}（${TILE_STR[p.discard]}）` : `向听 ${p.shanten}`;
+    const d = p.discard != null ? `切 ${tileFace(p.discard)}（${tileName(p.discard)}）` : `向听 ${p.shanten}`;
     card.innerHTML = `
       <div class="plan-head">
-        <span style="color:${PLAN_CSS[p.plan]}">${PLAN_CN[p.plan]}${best ? " ★" : ""}</span>
+        <span class="plan-name" style="color:${PLAN_CSS[p.plan]}">${PLAN_CN[p.plan]}${best ? " ★" : ""}</span>
         <span>EV ${p.ev.toFixed(2)} ｜ 胡牌率 ${(p.win_rate*100).toFixed(0)}% ｜ ${d}</span>
       </div>
       <div class="bar-wrap"><div class="bar" style="width:${Math.max(2, p.ev/maxEv*100)}%;background:${PLAN_CSS[p.plan]}"></div></div>`;
     box.appendChild(card);
   });
   // 切牌 EV 排行（刚摸牌时）
+  const rankBox = document.createElement("div");
   if (data.discard_rank && data.discard_rank.length) {
-    const rankBox = document.createElement("div");
     rankBox.innerHTML = '<div class="meta" style="margin-top:8px">切牌 EV 排行（' + PLAN_CN[r.plan] + '）：</div>';
     const maxEv = Math.max(...data.discard_rank.map(x => x.ev), 0.01);
     data.discard_rank.forEach(x => {
@@ -289,13 +434,13 @@ function show(data, ms){
       lab.style.marginTop = "-17px";
       lab.style.paddingLeft = "4px";
       lab.style.position = "relative";
-      lab.textContent = tileFace(x.discard) + " " + TILE_STR[x.discard] + "  EV " + x.ev.toFixed(2);
+      lab.textContent = tileFace(x.discard) + " " + tileName(x.discard) + "  EV " + x.ev.toFixed(2);
       const wrapEl = document.createElement("div");
       wrapEl.appendChild(rowEl); wrapEl.appendChild(lab);
       rankBox.appendChild(wrapEl);
     });
-    box.appendChild(rankBox);
   }
+  box.appendChild(rankBox);
   // 摸入期望榜（13 张待机时）
   if (data.draw_rank && data.draw_rank.length) {
     const drawBox = document.createElement("div");
@@ -311,7 +456,7 @@ function show(data, ms){
       lab.style.marginTop = "-17px";
       lab.style.paddingLeft = "4px";
       lab.style.position = "relative";
-      lab.textContent = tileFace(x.draw) + " " + TILE_STR[x.draw] + "  EV " + x.ev.toFixed(2) + "（余" + x.left + "）";
+      lab.textContent = tileFace(x.draw) + " " + tileName(x.draw) + "  EV " + x.ev.toFixed(2) + "（余" + x.left + "）";
       const wrapEl = document.createElement("div");
       wrapEl.appendChild(rowEl); wrapEl.appendChild(lab);
       drawBox.appendChild(wrapEl);
@@ -328,7 +473,7 @@ function show(data, ms){
   }
   // 本地存档
   try {
-    localStorage.setItem("mj_state", JSON.stringify({hand, melds, que: document.getElementById("que").value}));
+    localStorage.setItem("mj_state", JSON.stringify({hand, melds, oppMelds, rivers, que: document.getElementById("que").value}));
   } catch (e) {}
   document.getElementById("result").scrollIntoView({behavior:"smooth"});
 }
@@ -338,12 +483,14 @@ function show(data, ms){
     const s = JSON.parse(localStorage.getItem("mj_state") || "null");
     if (s) {
       hand = s.hand || []; melds = s.melds || [];
+      oppMelds = s.oppMelds || [[], [], []];
+      rivers = s.rivers || [[], [], []];
       if (s.que !== undefined && s.que !== null && s.que !== "") document.getElementById("que").value = String(s.que);
     }
   } catch (e) {}
 })();
 
-renderTiles(); render(); initMeldSelect(); renderMelds(); boot();
+renderTiles(); render(); initMeldSelect(); renderMelds(); renderRivers(); boot();
 </script>
 </body>
 </html>
