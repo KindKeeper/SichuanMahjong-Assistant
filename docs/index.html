@@ -147,7 +147,7 @@ async function boot(){
     const pyodide = await loadPyodide();
     window._py = pyodide;
     document.getElementById("loadmsg").textContent = "解包引擎中…";
-    const buf = await (await fetch("mahjong.zip?v=902b-f2038c9a")).arrayBuffer();
+    const buf = await (await fetch("mahjong.zip?v=90cb-f5778b72")).arrayBuffer();
     pyodide.unpackArchive(new Uint8Array(buf), "zip");
     pyodide.runPython(`
 import sys, json
@@ -281,6 +281,28 @@ function show(data, ms){
       rankBox.appendChild(wrapEl);
     });
     box.appendChild(rankBox);
+  }
+  // 摸入期望榜（13 张待机时）
+  if (data.draw_rank && data.draw_rank.length) {
+    const drawBox = document.createElement("div");
+    drawBox.innerHTML = '<div class="meta" style="margin-top:8px">摸入期望榜（' + PLAN_CN[r.plan] + '，期望摸到哪张）：</div>';
+    const maxEv2 = Math.max(...data.draw_rank.map(x => x.ev), 0.01);
+    data.draw_rank.forEach(x => {
+      const rowEl = document.createElement("div");
+      rowEl.className = "bar-wrap";
+      rowEl.style.height = "18px";
+      rowEl.innerHTML = '<div class="bar" style="width:' + Math.max(2, x.ev/maxEv2*100) + '%;background:#c9e2c9"></div>';
+      const lab = document.createElement("div");
+      lab.className = "meta";
+      lab.style.marginTop = "-17px";
+      lab.style.paddingLeft = "4px";
+      lab.style.position = "relative";
+      lab.textContent = tileFace(x.draw) + " " + TILE_STR[x.draw] + "  EV " + x.ev.toFixed(2);
+      const wrapEl = document.createElement("div");
+      wrapEl.appendChild(rowEl); wrapEl.appendChild(lab);
+      drawBox.appendChild(wrapEl);
+    });
+    box.appendChild(drawBox);
   }
   document.getElementById("result").scrollIntoView({behavior:"smooth"});
 }
