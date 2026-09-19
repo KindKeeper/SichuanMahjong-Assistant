@@ -15,6 +15,7 @@ h1 { font-size: 1.15rem; margin: 6px 0 10px; }
 .suit-label { width: 1.4em; font-weight: 600; color: #555; }
 .tile { flex: 1; padding: 10px 0; font-size: 1rem; border: 1px solid #ccc; border-radius: 8px; background: #fff; cursor: pointer; }
 .tile.face { font-size: 1.35rem; line-height: 1.25; padding: 6px 0; }
+.tile.hot { border-color: #54a24b; box-shadow: 0 0 0 2px rgba(84,162,75,.45); }
 .tile:active { background: #e8f0fe; }
 .hand { display: flex; flex-wrap: wrap; gap: 5px; min-height: 44px; padding: 6px; background: #eef1f4; border-radius: 8px; }
 .hand .tile { flex: 0 0 auto; padding: 8px 12px; }
@@ -147,7 +148,7 @@ async function boot(){
     const pyodide = await loadPyodide();
     window._py = pyodide;
     document.getElementById("loadmsg").textContent = "解包引擎中…";
-    const buf = await (await fetch("mahjong.zip?v=90cb-f5778b72")).arrayBuffer();
+    const buf = await (await fetch("mahjong.zip?v=921c-2979e30d")).arrayBuffer();
     pyodide.unpackArchive(new Uint8Array(buf), "zip");
     pyodide.runPython(`
 import sys, json
@@ -190,6 +191,7 @@ function renderTiles(){
       const t = s * 9 + r;
       const b = document.createElement("button");
       b.className = "tile face"; b.textContent = tileFace(t); b.title = SUITS[s] + RANKS[r];
+      b.dataset.tile = t;
       b.onclick = () => {
         const n = hand.filter(x => x === t).length;
         if (hand.length < 14 && n < 4) { hand.push(t); hand.sort((a,b)=>a-b); render(); }
@@ -212,7 +214,9 @@ function render(){
   document.getElementById("count").textContent = hand.length;
 }
 
-function clearHand(){ hand = []; render(); document.getElementById("result").style.display = "none"; }
+function clearHand(){ hand = []; melds = []; render(); renderMelds(); document.getElementById("result").style.display = "none";
+  document.querySelectorAll("#tiles .tile").forEach(el => el.classList.remove("hot"));
+  try { localStorage.removeItem("mj_state"); } catch (e) {} }
 
 async function analyze(){
   if (!pyodideReady) return;
@@ -297,15 +301,37 @@ function show(data, ms){
       lab.style.marginTop = "-17px";
       lab.style.paddingLeft = "4px";
       lab.style.position = "relative";
-      lab.textContent = tileFace(x.draw) + " " + TILE_STR[x.draw] + "  EV " + x.ev.toFixed(2);
+      lab.textContent = tileFace(x.draw) + " " + TILE_STR[x.draw] + "  EV " + x.ev.toFixed(2) + "（余" + x.left + "）";
       const wrapEl = document.createElement("div");
       wrapEl.appendChild(rowEl); wrapEl.appendChild(lab);
       drawBox.appendChild(wrapEl);
     });
     box.appendChild(drawBox);
   }
+  // 热牌高亮：摸入榜前三在点牌区标绿框
+  document.querySelectorAll("#tiles .tile").forEach(el => el.classList.remove("hot"));
+  if (data.draw_rank && data.draw_rank.length) {
+    const hot = new Set(data.draw_rank.slice(0, 3).map(x => String(x.draw)));
+    document.querySelectorAll("#tiles .tile").forEach(el => {
+      if (hot.has(el.dataset.tile)) el.classList.add("hot");
+    });
+  }
+  // 本地存档
+  try {
+    localStorage.setItem("mj_state", JSON.stringify({hand, melds, que: document.getElementById("que").value}));
+  } catch (e) {}
   document.getElementById("result").scrollIntoView({behavior:"smooth"});
 }
+
+(function restore(){
+  try {
+    const s = JSON.parse(localStorage.getItem("mj_state") || "null");
+    if (s) {
+      hand = s.hand || []; melds = s.melds || [];
+      if (s.que !== undefined && s.que !== null && s.que !== "") document.getElementById("que").value = String(s.que);
+    }
+  } catch (e) {}
+})();
 
 renderTiles(); render(); initMeldSelect(); renderMelds(); boot();
 </script>
