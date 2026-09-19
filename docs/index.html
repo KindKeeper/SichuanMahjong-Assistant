@@ -43,7 +43,7 @@ button:disabled { opacity: .5; }
   <div class="section">
     <div id="tiles"></div>
     <div class="row">
-      <span class="meta">手牌 <b id="count">0</b>/14（点牌加入，点手牌移除）</span>
+      <span class="meta">手牌 <b id="count">0/14</b>（点牌加入，点手牌移除；张数随副露自动调整）</span>
       <button onclick="clearHand()">清空</button>
     </div>
     <div class="hand" id="hand"></div>
@@ -141,6 +141,7 @@ function renderMelds(){
     wrap.onclick = () => { melds.splice(i, 1); renderMelds(); };
     box.appendChild(wrap);
   });
+  render(); // 副露变化 → 应持张数变化 → 刷新计数
 }
 
 async function boot(){
@@ -194,12 +195,18 @@ function renderTiles(){
       b.dataset.tile = t;
       b.onclick = () => {
         const n = hand.filter(x => x === t).length;
-        if (hand.length < 14 && n < 4) { hand.push(t); hand.sort((a,b)=>a-b); render(); }
+        if (hand.length < expectedIdle() + 1 && n < 4) { hand.push(t); hand.sort((a,b)=>a-b); render(); }
       };
       row.appendChild(b);
     }
     el.appendChild(row);
   }
+}
+
+function expectedIdle(){ // 含副露的应持张数：13+杠−3碰−4杠
+  const p = melds.filter(m => m.kind === "peng").length;
+  const g = melds.length - p;
+  return 13 + g - 3 * p - 4 * g;
 }
 
 function render(){
@@ -211,7 +218,7 @@ function render(){
     b.onclick = () => { hand.splice(i, 1); render(); };
     h.appendChild(b);
   });
-  document.getElementById("count").textContent = hand.length;
+  document.getElementById("count").textContent = hand.length + "/" + (expectedIdle() + 1);
 }
 
 function clearHand(){ hand = []; melds = []; render(); renderMelds(); document.getElementById("result").style.display = "none";
@@ -220,7 +227,10 @@ function clearHand(){ hand = []; melds = []; render(); renderMelds(); document.g
 
 async function analyze(){
   if (!pyodideReady) return;
-  if (hand.length < 13) { alert("请先输入 13~14 张手牌"); return; }
+  const idle = expectedIdle();
+  if (hand.length !== idle && hand.length !== idle + 1) {
+    alert(`含当前副露应持 ${idle} 张手牌（刚摸牌则 ${idle + 1} 张），当前 ${hand.length} 张`); return;
+  }
   const btn = document.getElementById("go");
   btn.disabled = true; btn.textContent = "计算中…";
   const t0 = performance.now();
