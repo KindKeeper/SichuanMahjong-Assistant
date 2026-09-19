@@ -179,8 +179,8 @@ def infer_json(s):
                        my_river=[int(t) for t in d.get("my_river", [])])
     return json.dumps(r, ensure_ascii=False)
 `);
-    window._analyzeJson = (s) => JSON.parse(pyodide.globals.get("analyze_json")(s));
-    window._inferJson = (s) => JSON.parse(pyodide.globals.get("infer_json")(s));
+    window._analyzeJson = (s) => JSON.parse(pyodide.globals.get("analyze_json")(JSON.stringify(s)));
+    window._inferJson = (s) => JSON.parse(pyodide.globals.get("infer_json")(JSON.stringify(s)));
     pyodideReady = true;
     document.getElementById("loading").style.display = "none";
   } catch (e) {
@@ -470,7 +470,7 @@ function setMode(m){
 function tapTile(t){
   if (mode === "hand"){
     const idle = expectedIdle();
-    if (hand.length >= idle + 1){ flashRec(`手牌已满 ${idle + 1} 张（先打/移除一张）`); return; }
+    if (hand.length >= idle + 1){ flashRec(`手牌已满 ${idle + 1} 张：点手牌区一张打出/移除后再录`); return; }
     if (hand.filter(x => x === t).length >= 4){ flashRec("同种牌最多 4 张"); return; }
     hand.push(t); hand.sort((a, b) => a - b);
   } else if (mode === "myriver"){
@@ -484,7 +484,14 @@ function tapTile(t){
     if (seat === "me"){
       if (myMelds.length >= 4){ flashRec("自家副露不超过 4 组"); return; }
       myMelds.push({kind, tile: t});
-      // 碰/杠后手牌相应减张由 expectedIdle 体现；手牌里的来源张由用户自行移除
+      // 副露来源张自动从手牌扣除（碰2/杠3/暗杠4/加杠1）——合并处理的正确口径
+      const need = kind === "peng" ? 2 : kind === "gang" ? 3 : kind === "angang" ? 4 : 1;
+      const have = hand.filter(x => x === t).length;
+      if (have >= need){
+        for (let n = 0; n < need; n++) hand.splice(hand.indexOf(t), 1);
+      } else if (kind !== "jiagang"){
+        flashRec(`已记${KIND_CN[kind]}：手牌 ${tileName(t)} 不足 ${need} 张，请手动调整`);
+      }
     } else {
       const o = opps[+seat];
       if (o.melds.length >= 4){ flashRec("该家副露不超过 4 组"); return; }
