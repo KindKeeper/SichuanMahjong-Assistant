@@ -50,6 +50,21 @@ button:disabled { opacity: .5; }
 
   <div class="section">
     <div class="row">
+      <span class="meta">副露（已碰/杠，可选）：</span>
+      <select id="meldTile"></select>
+      <select id="meldKind">
+        <option value="peng">碰</option>
+        <option value="gang">明杠</option>
+        <option value="angang">暗杠</option>
+      </select>
+      <button onclick="addMeld()">添加</button>
+    </div>
+    <div class="hand" id="melds"></div>
+    <div class="meta">添加副露后，手牌数自动按规则减少（碰 −3、杠 −4+1）。</div>
+  </div>
+
+  <div class="section">
+    <div class="row">
       <label>定缺
         <select id="que">
           <option value="">自动</option>
@@ -86,7 +101,46 @@ for (let s = 0; s < 3; s++) for (let r = 0; r < 9; r++) TILE_STR.push(SUITS[s] +
 const PLAN_CN = {normal:"平胡", dazi:"大对子", qidui:"七对", flush:"清一色"};
 const PLAN_CSS = {normal:"var(--n)", dazi:"var(--d)", qidui:"var(--q)", flush:"var(--f)"};
 let hand = [];
+let melds = [];
 let pyodideReady = false;
+
+function initMeldSelect(){
+  const sel = document.getElementById("meldTile");
+  sel.innerHTML = "";
+  for (let t = 0; t < 27; t++){
+    const o = document.createElement("option");
+    o.value = t; o.textContent = tileFace(t) + " " + TILE_STR[t];
+    sel.appendChild(o);
+  }
+}
+
+function addMeld(){
+  if (melds.length >= 4) { alert("副露不超过 4 组"); return; }
+  const tile = +document.getElementById("meldTile").value;
+  const kind = document.getElementById("meldKind").value;
+  melds.push({tile, kind});
+  renderMelds();
+}
+
+function renderMelds(){
+  const box = document.getElementById("melds");
+  box.innerHTML = "";
+  const KIND_CN = {peng: "碰", gang: "明杠", angang: "暗杠"};
+  melds.forEach((m, i) => {
+    const b = document.createElement("button");
+    b.className = "tile face";
+    b.textContent = tileFace(m.tile);
+    b.title = KIND_CN[m.kind] + " " + TILE_STR[m.tile];
+    const tag = document.createElement("span");
+    tag.textContent = KIND_CN[m.kind];
+    tag.style.cssText = "font-size:.7rem;color:#666;margin-right:4px";
+    const wrap = document.createElement("span");
+    wrap.style.cssText = "display:inline-flex;align-items:center;background:#e8f0fe;border-radius:8px;padding:2px 4px;margin:2px";
+    wrap.appendChild(tag); wrap.appendChild(b);
+    wrap.onclick = () => { melds.splice(i, 1); renderMelds(); };
+    box.appendChild(wrap);
+  });
+}
 
 async function boot(){
   try {
@@ -104,7 +158,8 @@ from mahjong.assistant import analyze as _analyze
 
 def analyze_json(s):
     d = json.loads(s)
-    r = _analyze([int(t) for t in d["tiles"]], d.get("que"), int(d.get("k", 20)))
+    r = _analyze([int(t) for t in d["tiles"]], d.get("que"), int(d.get("k", 20)),
+                 melds=[(m["kind"], int(m["tile"])) for m in d.get("melds", [])])
     return json.dumps(r, ensure_ascii=False)
 `);
     window._analyzeJson = pyodide.globals.get("analyze_json");
@@ -169,7 +224,8 @@ async function analyze(){
     const payload = JSON.stringify({
       tiles: hand,
       que: document.getElementById("que").value === "" ? null : +document.getElementById("que").value,
-      k: +document.getElementById("k").value
+      k: +document.getElementById("k").value,
+      melds: melds
     });
     const data = JSON.parse(window._analyzeJson(payload));
     show(data, performance.now() - t0);
@@ -204,10 +260,32 @@ function show(data, ms){
       <div class="bar-wrap"><div class="bar" style="width:${Math.max(2, p.ev/maxEv*100)}%;background:${PLAN_CSS[p.plan]}"></div></div>`;
     box.appendChild(card);
   });
+  // 切牌 EV 排行（刚摸牌时）
+  if (data.discard_rank && data.discard_rank.length) {
+    const rankBox = document.createElement("div");
+    rankBox.innerHTML = '<div class="meta" style="margin-top:8px">切牌 EV 排行（' + PLAN_CN[r.plan] + '）：</div>';
+    const maxEv = Math.max(...data.discard_rank.map(x => x.ev), 0.01);
+    data.discard_rank.forEach(x => {
+      const rowEl = document.createElement("div");
+      rowEl.className = "bar-wrap";
+      rowEl.style.height = "18px";
+      rowEl.innerHTML = '<div class="bar" style="width:' + Math.max(2, x.ev/maxEv*100) + '%;background:#9ec9e2"></div>';
+      const lab = document.createElement("div");
+      lab.className = "meta";
+      lab.style.marginTop = "-17px";
+      lab.style.paddingLeft = "4px";
+      lab.style.position = "relative";
+      lab.textContent = tileFace(x.discard) + " " + TILE_STR[x.discard] + "  EV " + x.ev.toFixed(2);
+      const wrapEl = document.createElement("div");
+      wrapEl.appendChild(rowEl); wrapEl.appendChild(lab);
+      rankBox.appendChild(wrapEl);
+    });
+    box.appendChild(rankBox);
+  }
   document.getElementById("result").scrollIntoView({behavior:"smooth"});
 }
 
-renderTiles(); render(); boot();
+renderTiles(); render(); initMeldSelect(); renderMelds(); boot();
 </script>
 </body>
 </html>
