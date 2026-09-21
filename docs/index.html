@@ -226,7 +226,7 @@ async function boot(){
     if (!loaded) throw new Error("所有镜像均不可达或初始化超时（cdn/fastly/gcore.jsdelivr.net）");
     const pyodide = window._py;
     msg("解包引擎中…");
-    const buf = await (await fetch("mahjong.zip?v=e6fd-ad5577b6")).arrayBuffer();
+    const buf = await (await fetch("mahjong.zip?v=e7de-bef29fa7")).arrayBuffer();
     pyodide.unpackArchive(new Uint8Array(buf), "zip");
     pyodide.runPython(`
 import sys, json
