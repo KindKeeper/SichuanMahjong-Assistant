@@ -28,10 +28,11 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 .zone-label { font-size: .75rem; color: #999; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center; }
 
 /* ---- 真实牌面（SVG：筒=圆点阵、索=竹条、万=黑字红万） ---- */
-.tilef { display: inline-flex; align-items: center; justify-content: center; padding: 1px;
-  background: linear-gradient(#fffef8, #f3eddc); border: 1px solid #b3ab96; border-radius: 5px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.28), inset 0 1px 0 #fff; line-height: 0; user-select: none; overflow: hidden; }
+.tilef { display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  background: transparent; border: none; border-radius: 4px; line-height: 0; user-select: none;
+  overflow: hidden; filter: drop-shadow(0 1px 1px rgba(0,0,0,.3)); }
 .tilef svg { width: 100%; height: 100%; display: block; }
+.tilef img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
 .p { width: 26px; height: 36px; cursor: pointer; padding: 0; touch-action: none; }
 .tp { height: 46px; }
 .tilef.mini { width: 20px; height: 27px; }
@@ -165,6 +166,7 @@ h1 { font-size: 1.05rem; margin: 6px 4px; }
       </div>
       <div id="plans"></div>
       <div class="meta">口径：v1.9 引擎（碰杠开 / 官方累加计分 / 哑对手）· EV=每手期望分（和牌+杠租）</div>
+      <div class="meta">牌面素材：riichi-mahjong-tiles（CC0 公有领域，FluffyStuff）</div>
       <div class="meta">牌盘底边=危险度（基于对手 MAP 听牌估计）：蓝 &lt;5% · 黄 5-10% · 红 10-15% · 深红 &gt;15%；现物/筋已折算</div>
     </div>
   </details>
@@ -324,38 +326,11 @@ function tileFace(t){ // Unicode 牌面：条 0x1F010，饼 0x1F019，万 0x1F00
   return String.fromCodePoint(base + (t % 9));
 }
 function tileName(t){ return TILE_STR[t]; }
-// 点数阵布局（30x40 视窗坐标）
-const PIPS = {
-  1: [[15, 20]],
-  2: [[10, 12], [20, 28]],
-  3: [[10, 11], [15, 20], [20, 29]],
-  4: [[10, 11], [20, 11], [10, 29], [20, 29]],
-  5: [[10, 11], [20, 11], [15, 20], [10, 29], [20, 29]],
-  6: [[10, 9], [20, 9], [10, 20], [20, 20], [10, 31], [20, 31]],
-  7: [[10, 8], [20, 8], [15, 14], [10, 22], [20, 22], [10, 33], [20, 33]],
-  8: [[10, 7], [20, 7], [10, 15], [20, 15], [10, 24], [20, 24], [10, 33], [20, 33]],
-  9: [[10, 8], [15, 8], [20, 8], [10, 20], [15, 20], [20, 20], [10, 32], [15, 32], [20, 32]],
-};
-const SUJI_RED = {4: 0, 5: 1, 6: 0, 8: 2, 9: 4};  // 传统：这些索子含一根红条
 
-function tileSVG(t){ // 近似真实牌面：筒=圆点阵，索=竹条，万=黑字红万
-  const s = Math.floor(t / 9), r = t % 9, n = r + 1;
-  if (s === 2){
-    return `<svg viewBox="0 0 30 40"><text x="15" y="18" text-anchor="middle" font-size="15" font-weight="800" fill="#22272f">${RANKS[r]}</text>` +
-      `<text x="15" y="35" text-anchor="middle" font-size="13" font-weight="800" fill="#c02626">万</text></svg>`;
-  }
-  if (s === 1){
-    const pips = PIPS[n].map(([x, y], i) => n === 1
-      ? `<circle cx="${x}" cy="${y}" r="7" fill="none" stroke="#1559b0" stroke-width="2.2"/><circle cx="${x}" cy="${y}" r="2.4" fill="#c02626"/>`
-      : `<circle cx="${x}" cy="${y}" r="3.7" fill="${i === 0 && (n === 5 || n === 9) ? "#c02626" : "#1559b0"}"/>`).join("");
-    return `<svg viewBox="0 0 30 40">${pips}</svg>`;
-  }
-  const sticks = PIPS[n].map(([x, y], i) => {
-    const g = SUJI_RED[n] === i ? "#c02626" : "#1e7a34";
-    return `<rect x="${x - 2.1}" y="${y - 5.2}" width="4.2" height="10.4" rx="2" fill="${g}"/>` +
-           `<rect x="${x - 2.1}" y="${y - 0.9}" width="4.2" height="1.8" fill="#f3eddc"/>`;
-  }).join("");
-  return `<svg viewBox="0 0 30 40">${sticks}</svg>`;
+const TILE_IMG = ["Sou", "Pin", "Man"];  // 条=索 Sou / 饼=筒 Pin / 万=Man
+function tileSVG(t){ // 现成牌面素材（CC0: FluffyStuff/riichi-mahjong-tiles，本地自托管）
+  const s = Math.floor(t / 9), n = t % 9 + 1;
+  return `<img src="tiles/${TILE_IMG[s]}${n}.svg" alt="${tileName(t)}" draggable="false">`;
 }
 function tileDiv(t, cls){
   return `<span class="tilef ${cls || ""}">${tileSVG(t)}</span>`;
