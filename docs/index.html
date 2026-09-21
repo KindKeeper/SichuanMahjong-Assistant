@@ -28,22 +28,28 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 .zone:last-child { border-bottom: none; }
 .zone-label { font-size: .75rem; color: #999; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center; }
 
-/* ---- 彩色麻将牌面（近似真实牌：象牙底、条绿/饼蓝/万红） ---- */
-.tilef { display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
-  background: linear-gradient(#fffef8, #f3eddc); border: 1px solid #b5ad99; border-radius: 5px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.28), inset 0 1px 0 #fff; line-height: 1; user-select: none; }
-.tilef b { font-size: 1.02em; font-weight: 800; }
-.tilef i { font-size: .52em; font-style: normal; color: #97907e; margin-top: 1px; }
-.su0 b { color: #1e7a34; }  /* 条：绿 */
-.su1 b { color: #1559b0; }  /* 饼：蓝 */
-.su2 b { color: #c02626; }  /* 万：红 */
-.p { width: 28px; height: 38px; cursor: pointer; padding: 0; touch-action: none; }
-.p.tilef { font-size: .95rem; }
-.tp.tilef { font-size: 1.25rem; height: 48px; }
-.bg-cell.tilef { font-size: .8rem; }
-.tilef.mini { font-size: .8rem; padding: 1px 3px; }
+/* ---- 真实牌面（SVG：筒=圆点阵、索=竹条、万=黑字红万） ---- */
+.tilef { display: inline-flex; align-items: center; justify-content: center; padding: 1px;
+  background: linear-gradient(#fffef8, #f3eddc); border: 1px solid #b3ab96; border-radius: 5px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.28), inset 0 1px 0 #fff; line-height: 0; user-select: none; overflow: hidden; }
+.tilef svg { width: 100%; height: 100%; display: block; }
+.p { width: 26px; height: 36px; cursor: pointer; padding: 0; touch-action: none; }
+.tp { height: 46px; }
+.tilef.mini { width: 20px; height: 27px; }
+.inbtn { font-size: .85rem; border: 1px solid var(--line); background: #fff; border-radius: 6px;
+  padding: 2px 8px; cursor: pointer; margin-left: 4px; }
+.inbtn.on { background: #4c78a8; color: #fff; border-color: #4c78a8; }
 [data-drop].dragover { outline: 2px dashed #4c78a8; outline-offset: 2px; background: #eaf2fb; }
 #dragghost { position: fixed; z-index: 200; pointer-events: none; opacity: .88; transform: scale(1.12) rotate(3deg); }
+#dragghost .tilef { width: 30px; height: 42px; }
+/* 输入法式牌盘：默认收起，点区域弹出 */
+#palette { transform: translateY(103%); transition: transform .18s ease; }
+#palette.open { transform: none; }
+#pback { position: fixed; inset: 0; background: rgba(20,24,30,.28); z-index: 39; display: none; }
+#pback.open { display: block; }
+#phead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+#phead .nm { font-weight: 700; font-size: .95rem; }
+#pclose { border: none; background: #eceff2; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 
 /* ---- 牌块通用 ---- */
 .tiles { display: flex; flex-wrap: wrap; gap: 3px; min-height: 30px; align-items: center; }
@@ -135,7 +141,7 @@ h1 { font-size: 1.05rem; margin: 6px 4px; }
         <button id="gstart" class="mini-undo" style="border:1px solid var(--line);border-radius:7px;padding:7px 12px">新开一局（用当前 13 张手牌）</button>
         <button id="gexit" class="mini-undo" style="border:1px solid var(--line);border-radius:7px;padding:7px 12px">退出对局</button>
       </div>
-      <div class="meta">开局后底部牌盘变为动作录入：我摸/我出/各家出；碰杠胡用下方按钮。对手定缺取各家卡上的定缺选择。</div>
+      <div class="meta">录入像输入法：点任意区域的 ⌨ 弹出牌盘，点牌即录入该区域（我的"手牌 ⌨"=记我摸，"牌河 ⌨"=记我出，对手牌河同理）；碰/杠/胡/荒庄用下方按钮（按可行动作红框高亮）。对手定缺取各家卡上的选择。</div>
       <div id="gbar" style="margin:8px 0"></div>
       <div id="gout"></div>
     </div>
@@ -162,19 +168,15 @@ h1 { font-size: 1.05rem; margin: 6px 4px; }
   </details>
 </div>
 
+<div id="pback"></div>
 <div id="palette"><div class="in">
-  <div id="modes">
-    <button data-m="hand" class="on">我·手牌</button>
-    <button data-m="myriver">我·出</button>
-    <button data-m="or0">对·出</button>
-    <button data-m="or1">下·出</button>
-    <button data-m="or2">上·出</button>
-    <button data-m="meld">副露</button>
+  <div id="phead">
+    <span class="nm" id="ptitle">录入：点某区域的 ⌨</span>
+    <button id="pclose">收起 ✕</button>
   </div>
   <div id="meldCfg">
-    <select id="meldSeat"><option value="me">我</option><option value="0">对家</option><option value="1">下家</option><option value="2">上家</option></select>
     <select id="meldKind"><option value="peng">碰</option><option value="gang">明杠</option><option value="angang">暗杠</option></select>
-    <span class="meta">点上方牌盘选张</span>
+    <span class="meta">选类型后点牌</span>
   </div>
   <div id="ptiles"></div>
 </div></div>
@@ -270,7 +272,7 @@ let opps = [                   // 三家：牌河/副露手动，手牌由信念
   {river: [], melds: [], que: null, belief: null},
 ];
 let myQue = null;
-let mode = "hand";             // hand | myriver | or0..2 | meld
+let input = {target: null};    // 输入法目标：{type:"hand"|"myriver"|"or"|"meld", i?, seat?, op?, label}
 let lastAna = null;
 let lastDanger = null;         // 最近一次读牌的 danger 字段
 let lastRecText = "录入手牌后自动分析…";
@@ -369,7 +371,11 @@ function renderOppSeat(i){
   hz.appendChild(mapline);
   seat.appendChild(hz);
   // 副露
-  const mz = zone("副露", undoClr(() => o.melds.pop(), () => { o.melds = []; renderSeats(); }));
+  const mzr = document.createElement("span");
+  mzr.appendChild(undoClr(() => o.melds.pop(), () => { o.melds = []; renderSeats(); }));
+  mzr.appendChild(inbtn(game ? {type: "meld", seat: String(i), label: OPP_CN[i] + "副露（碰/杠）"}
+                               : {type: "meld", seat: String(i), label: OPP_CN[i] + "副露"}));
+  const mz = zone("副露", mzr);
   const mtiles = document.createElement("div");
   mtiles.className = "tiles";
   o.melds.forEach((m, j) => {
@@ -380,7 +386,11 @@ function renderOppSeat(i){
   mz.appendChild(mtiles);
   seat.appendChild(mz);
   // 牌河
-  const rz = zone("牌河", undoClr(() => o.river.pop(), () => { o.river = []; renderSeats(); }));
+  const rzr = document.createElement("span");
+  rzr.appendChild(undoClr(() => o.river.pop(), () => { o.river = []; renderSeats(); }));
+  rzr.appendChild(inbtn(game ? {op: "or", seat: SEAT_OF_OPP[i], label: "记录" + OPP_CN[i] + "出牌"}
+                              : {type: "or", i, label: OPP_CN[i] + "牌河"}));
+  const rz = zone("牌河", rzr);
   const rtiles = document.createElement("div");
   rtiles.className = "tiles";
   o.river.forEach((t, j) => rtiles.appendChild(pBtn(t, () => { o.river.splice(j, 1); renderSeats(); })));
@@ -418,14 +428,20 @@ function renderMySeat(){
   head.appendChild(clr);
   seat.appendChild(head);
   // 手牌
-  const hz = zone("手牌（点我移除/拖到牌河=打出）");
+  const hzr = document.createElement("span");
+  hzr.appendChild(inbtn(game ? {op: "medraw", label: "我摸（录入摸牌）"}
+                             : {type: "hand", label: "我的手牌"}));
+  const hz = zone("手牌（点我移除/拖到牌河=打出）", hzr);
   hz.dataset.drop = "hand";
   const ht = document.createElement("div");
   ht.className = "tiles"; ht.id = "myhand";
   hz.appendChild(ht);
   seat.appendChild(hz);
   // 副露
-  const mz = zone("副露", undoClr(() => { myMelds.pop(); renderSeats(); }, () => { myMelds = []; renderSeats(); }));
+  const mzr2 = document.createElement("span");
+  mzr2.appendChild(undoClr(() => { myMelds.pop(); renderSeats(); }, () => { myMelds = []; renderSeats(); }));
+  mzr2.appendChild(inbtn({type: "meld", seat: "me", label: "我的副露（碰/杠）"}));
+  const mz = zone("副露", mzr2);
   const mt = document.createElement("div");
   mt.className = "tiles";
   myMelds.forEach((m, j) => {
@@ -436,7 +452,11 @@ function renderMySeat(){
   mz.appendChild(mt);
   seat.appendChild(mz);
   // 牌河
-  const rz = zone("牌河", undoClr(() => { myRiver.pop(); renderSeats(); }, () => { myRiver = []; renderSeats(); }));
+  const rzr2 = document.createElement("span");
+  rzr2.appendChild(undoClr(() => { myRiver.pop(); renderSeats(); }, () => { myRiver = []; renderSeats(); }));
+  rzr2.appendChild(inbtn(game ? {op: "mdiscard", label: "我出（录入打出）"}
+                              : {type: "myriver", label: "我的牌河"}));
+  const rz = zone("牌河", rzr2);
   rz.dataset.drop = "myriver";
   const rt = document.createElement("div");
   rt.className = "tiles";
@@ -492,9 +512,9 @@ function renderBeliefs(){
         const t = s * 9 + r;
         const e = marg[t];
         const cell = document.createElement("div");
-        cell.className = "bg-cell tilef" + (e < 0.02 ? " na" : "") + " su" + s;
+        cell.className = "bg-cell tilef" + (e < 0.02 ? " na" : "");
         cell.style.background = e < 0.02 ? "" : `rgba(76,120,168,${Math.min(1, 0.18 + e / 4 * 0.82)})`;
-        cell.innerHTML = `<b>${RANKS[r]}</b><i>${SUITS[s]}</i>`;
+        cell.innerHTML = tileSVG(t);
         cell.title = `${tileName(t)} 期望 ${e.toFixed(2)} 张`;
         const es = document.createElement("span"); es.className = "e"; es.textContent = e.toFixed(1);
         cell.appendChild(es);
@@ -532,9 +552,9 @@ function renderPalette(){
       const t = s * 9 + r;
       const left = 4 - visibleCnt(t);
       const b = document.createElement("button");
-      b.className = "tp tilef" + (left <= 0 ? " zero" : "") + (hot.has(t) ? " hot" : "") + (cut.has(t) ? " cut" : "") + dg(t) + " su" + s;
+      b.className = "tp tilef" + (left <= 0 ? " zero" : "") + (hot.has(t) ? " hot" : "") + (cut.has(t) ? " cut" : "") + dg(t);
       b.dataset.tile = t;
-      b.innerHTML = `<b>${RANKS[r]}</b><i>${SUITS[s]}</i><span class="cnt">${left}</span>`;
+      b.innerHTML = tileSVG(t) + `<span class="cnt">${left}</span>`;
       b.title = `${tileName(t)} 余 ${left}` + (lastDanger ? ` · 危险度 ${(lastDanger.tiles[t] * 100).toFixed(0)}%` : "");
       b.onclick = () => tapTile(t);
       row.appendChild(b);
@@ -604,40 +624,83 @@ function handleDrop(zone, t, from){
   }
 }
 
-// ---------- 输入路由 ----------
-function setMode(m){
-  mode = m;
-  document.querySelectorAll("#modes button").forEach(x => x.classList.toggle("on", x.dataset.m === m));
-  document.getElementById("meldCfg").classList.toggle("show", m === "meld");
+// ---------- 输入法（点区域 ⌨ 弹出牌盘，录入直达该区域） ----------
+function openInput(target){
+  input.target = target;
+  document.getElementById("palette").classList.add("open");
+  document.getElementById("pback").classList.add("open");
+  document.getElementById("ptitle").textContent = "录入 → " + target.label;
+  document.getElementById("meldCfg").classList.toggle("show", target.type === "meld");
+  document.querySelectorAll(".inbtn").forEach(b => b.classList.toggle("on", b._tgt === target));
+}
+function closeInput(){
+  input.target = null;
+  document.getElementById("palette").classList.remove("open");
+  document.getElementById("pback").classList.remove("open");
+  document.querySelectorAll(".inbtn").forEach(b => b.classList.remove("on"));
+}
+function inbtn(target){ // 区域标题上的 ⌨ 触发钮
+  const b = document.createElement("button");
+  b.className = "inbtn";
+  b.textContent = "⌨";
+  b.title = "录入到" + target.label;
+  b._tgt = target;
+  b.onclick = (e) => { e.stopPropagation(); openInput(target); };
+  return b;
 }
 function tapTile(t){
-  if (game && gameTap(t)) return;
-  if (mode === "hand"){
+  if (game && game.pending){ // 杠/自摸的选张优先（面板已按其标签弹出）
+    const p = game.pending; game.pending = null;
+    if (p.kind === "angang") game.actions.push({op: "call", seat: 0, tile: t, kind: "angang", kong: t});
+    else if (p.kind === "jiagang") game.actions.push({op: "call", seat: 0, tile: t, kind: "jiagang", kong: t});
+    else if (p.kind === "zimo") game.actions.push({op: "win", seat: p.seat, tile: t, mode: "zimo"});
+    renderGameBar(); recSync();
+    return;
+  }
+  const tg = input.target;
+  if (!tg){ flashRec("先点某区域的 ⌨ 弹出录入面板"); return; }
+  if (game){
+    if (tg.op === "medraw") game.actions.push({op: "me_draw", tile: t});
+    else if (tg.op === "mdiscard") game.actions.push({op: "me_discard", tile: t});
+    else if (tg.op === "or") game.actions.push({op: "opp_discard", seat: tg.seat, tile: t});
+    else if (tg.type === "meld"){
+      const kind = document.getElementById("meldKind").value;
+      const seat = tg.seat === "me" ? 0 : SEAT_OF_OPP[+tg.seat];
+      if (kind === "angang"){
+        game.actions.push({op: "call", seat, tile: t, kind: "angang", kong: t});
+      } else {
+        const lt = lastDiscardTile();
+        if (lt === null){ flashRec("碰/明杠需有上一张舍牌（暗杠请选类型）"); return; }
+        game.actions.push({op: "call", seat, tile: lt, kind});
+      }
+    }
+    renderGameBar(); recSync();
+    return;
+  }
+  if (tg.type === "hand"){
     const idle = expectedIdle();
-    if (hand.length >= idle + 1){ flashRec(`手牌已满 ${idle + 1} 张：点手牌区一张打出/移除后再录`); return; }
+    if (hand.length >= idle + 1){ flashRec(`手牌已满 ${idle + 1} 张：打出/移除一张后再录`); return; }
     if (hand.filter(x => x === t).length >= 4){ flashRec("同种牌最多 4 张"); return; }
     hand.push(t); hand.sort((a, b) => a - b);
-  } else if (mode === "myriver"){
+  } else if (tg.type === "myriver"){
     myRiver.push(t);
-  } else if (mode.startsWith("or")){
-    const i = +mode.slice(2);
-    opps[i].river.push(t);
-  } else if (mode === "meld"){
-    const seat = document.getElementById("meldSeat").value;
+  } else if (tg.type === "or"){
+    opps[tg.i].river.push(t);
+  } else if (tg.type === "meld"){
     const kind = document.getElementById("meldKind").value;
-    if (seat === "me"){
+    if (tg.seat === "me"){
       if (myMelds.length >= 4){ flashRec("自家副露不超过 4 组"); return; }
       myMelds.push({kind, tile: t});
-      // 副露来源张自动从手牌扣除（碰2/杠3/暗杠4/加杠1）——合并处理的正确口径
-      const need = kind === "peng" ? 2 : kind === "gang" ? 3 : kind === "angang" ? 4 : 1;
+      // 副露来源张自动从手牌扣除（碰2/杠3/暗杠4）——合并处理的正确口径
+      const need = kind === "peng" ? 2 : kind === "gang" ? 3 : 4;
       const have = hand.filter(x => x === t).length;
       if (have >= need){
         for (let n = 0; n < need; n++) hand.splice(hand.indexOf(t), 1);
-      } else if (kind !== "jiagang"){
+      } else {
         flashRec(`已记${KIND_CN[kind]}：手牌 ${tileName(t)} 不足 ${need} 张，请手动调整`);
       }
     } else {
-      const o = opps[+seat];
+      const o = opps[+tg.seat];
       if (o.melds.length >= 4){ flashRec("该家副露不超过 4 组"); return; }
       o.melds.push({kind, tile: t});
     }
@@ -661,7 +724,7 @@ function persist(){
     localStorage.setItem("mj_v3", JSON.stringify({
       hand, myMelds, myRiver,
       opps: opps.map(o => ({river: o.river, melds: o.melds, que: o.que})),
-      myQue, mode,
+      myQue,
     }));
   } catch (e) {}
 }
@@ -672,7 +735,6 @@ function persist(){
     hand = s.hand || []; myMelds = s.myMelds || []; myRiver = s.myRiver || [];
     (s.opps || []).forEach((o, i) => { opps[i].river = o.river || []; opps[i].melds = o.melds || []; opps[i].que = o.que ?? null; });
     myQue = s.myQue ?? null;
-    if (s.mode) mode = s.mode;
   } catch (e) {}
 })();
 
@@ -833,7 +895,7 @@ async function runInfer(){
 // 会话座位：0=我，1=下家，2=对家，3=上家（轮转顺序）；显示桶 opps[对,下,上]
 const OPP_OF_SEAT = {1: 1, 2: 0, 3: 2};
 const SEAT_OF_OPP = {0: 2, 1: 1, 2: 3};
-let game = null; // {dealer, actions, st, gmode, pending, my0, myQue}
+let game = null; // {dealer, actions, st, pending, my0, myQue}
 
 async function callRec(payload, which){
   const path = "/api/rec/" + which;
@@ -856,9 +918,8 @@ function startGame(){
     if (opps[i].que !== null) actions.push({op: "que", seat: SEAT_OF_OPP[i], que: opps[i].que});
   }
   game = {dealer: +document.getElementById("gdealer").value, actions, st: null,
-          gmode: "medraw", pending: null, my0, myQue};
+          pending: null, my0, myQue};
   document.getElementById("gameSec").open = true;
-  document.getElementById("modes").style.display = "none";
   document.getElementById("meldCfg").classList.remove("show");
   flashRec("对局开始：按轮转录入（我摸→我出→各家出…）");
   renderGameBar();
@@ -868,7 +929,6 @@ function exitGame(){
   game = null;
   document.getElementById("gbar").innerHTML = "";
   document.getElementById("gout").innerHTML = "";
-  document.getElementById("modes").style.display = "";
   renderPalette();
 }
 
@@ -880,24 +940,6 @@ function lastDiscardTile(){
   return null;
 }
 
-function gameTap(t){
-  if (!game) return false;
-  if (game.pending){
-    const p = game.pending; game.pending = null;
-    if (p.kind === "angang") game.actions.push({op: "call", seat: 0, tile: t, kind: "angang", kong: t});
-    else if (p.kind === "jiagang") game.actions.push({op: "call", seat: 0, tile: t, kind: "jiagang", kong: t});
-    else if (p.kind === "zimo") game.actions.push({op: "win", seat: p.seat, tile: t, mode: "zimo"});
-  } else if (game.gmode === "medraw"){
-    game.actions.push({op: "me_draw", tile: t});
-  } else if (game.gmode === "mdiscard"){
-    game.actions.push({op: "me_discard", tile: t});
-  } else {
-    game.actions.push({op: "opp_discard", seat: SEAT_OF_OPP[game.gmode.slice(2)], tile: t});
-  }
-  renderGameBar();
-  recSync();
-  return true;
-}
 
 function gameAct(kind){
   const st = game.st;
@@ -914,9 +956,12 @@ function gameAct(kind){
     if (t === null){ flashRec("点炮需有上一张舍牌"); return; }
     game.actions.push({op: "win", seat, tile: t, mode: "rong"});
   } else if (kind === "zimo"){
-    game.pending = {kind: "zimo", seat: +document.getElementById("gcallSeat").value};
+    const seat = +document.getElementById("gcallSeat").value;
+    game.pending = {kind: "zimo", seat};
+    openInput({type: "pending", label: `自摸选张（${gameSeatName(seat)}）`});
   } else if (kind === "angang" || kind === "jiagang"){
     game.pending = {kind};
+    openInput({type: "pending", label: (kind === "angang" ? "暗杠" : "加杠") + "选张"});
   }
   renderGameBar();
   recSync();
@@ -971,19 +1016,7 @@ function renderGameBar(){
   if (!game){ bar.innerHTML = ""; return; }
   const st = game.st;
   bar.innerHTML = "";
-  const row1 = document.createElement("div");
-  row1.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;margin:4px 0";
-  const modes = [["medraw", "我摸"], ["mdiscard", "我出"], ["or1", "下出"], ["or0", "对出"], ["or2", "上出"]];
-  modes.forEach(([m, n]) => {
-    const b = document.createElement("button");
-    b.className = "mini-undo";
-    b.style.cssText = "border:1px solid var(--line);border-radius:7px;padding:7px 10px" + (game.gmode === m ? ";background:#4c78a8;color:#fff" : "");
-    b.textContent = n;
-    b.onclick = () => { game.gmode = m; game.pending = null; renderGameBar(); };
-    row1.appendChild(b);
-  });
-  bar.appendChild(row1);
-  // 动作按钮行
+  // 动作按钮行（录入走区域 ⌨ 弹出的输入法面板）
   const row2 = document.createElement("div");
   row2.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:4px 0";
   const seatSel = document.createElement("select");
@@ -1057,12 +1090,12 @@ async function recExport(){
 }
 
 // ---------- 启动 ----------
-document.querySelectorAll("#modes button").forEach(b => b.onclick = () => setMode(b.dataset.m));
+document.getElementById("pclose").onclick = closeInput;
+document.getElementById("pback").onclick = closeInput;
 document.getElementById("go").onclick = runAna;
 document.getElementById("gstart").onclick = startGame;
 document.getElementById("gexit").onclick = exitGame;
 renderSeats();
-setMode(mode);
 scheduleAna();
 scheduleInfer();
 if (typeof boot === "function") boot();
