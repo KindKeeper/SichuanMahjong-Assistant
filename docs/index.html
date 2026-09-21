@@ -28,11 +28,26 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 .zone:last-child { border-bottom: none; }
 .zone-label { font-size: .75rem; color: #999; margin-bottom: 3px; display: flex; justify-content: space-between; align-items: center; }
 
+/* ---- 彩色麻将牌面（近似真实牌：象牙底、条绿/饼蓝/万红） ---- */
+.tilef { display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  background: linear-gradient(#fffef8, #f3eddc); border: 1px solid #b5ad99; border-radius: 5px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.28), inset 0 1px 0 #fff; line-height: 1; user-select: none; }
+.tilef b { font-size: 1.02em; font-weight: 800; }
+.tilef i { font-size: .52em; font-style: normal; color: #97907e; margin-top: 1px; }
+.su0 b { color: #1e7a34; }  /* 条：绿 */
+.su1 b { color: #1559b0; }  /* 饼：蓝 */
+.su2 b { color: #c02626; }  /* 万：红 */
+.p { width: 28px; height: 38px; cursor: pointer; padding: 0; touch-action: none; }
+.p.tilef { font-size: .95rem; }
+.tp.tilef { font-size: 1.25rem; height: 48px; }
+.bg-cell.tilef { font-size: .8rem; }
+.tilef.mini { font-size: .8rem; padding: 1px 3px; }
+[data-drop].dragover { outline: 2px dashed #4c78a8; outline-offset: 2px; background: #eaf2fb; }
+#dragghost { position: fixed; z-index: 200; pointer-events: none; opacity: .88; transform: scale(1.12) rotate(3deg); }
+
 /* ---- 牌块通用 ---- */
 .tiles { display: flex; flex-wrap: wrap; gap: 3px; min-height: 30px; align-items: center; }
-.p { width: 26px; height: 36px; border: 1px solid #c6ccd4; border-radius: 4px; background: #fff;
-     display: inline-flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; padding: 0; }
-.p:active { background: #e8f0fe; }
+.p:active { filter: brightness(.93); }
 .p.back { background: #dfe7ef; color: transparent; }            /* 暗杠背牌 */
 .chip { display: inline-flex; gap: 2px; background: #eaf1f8; border-radius: 6px; padding: 2px 4px; margin: 1px; cursor: pointer; }
 .chip .k { font-size: .68rem; color: #667; align-self: center; margin-right: 2px; }
@@ -173,7 +188,7 @@ async function boot(){
     const pyodide = await loadPyodide();
     window._py = pyodide;
     document.getElementById("loadmsg").textContent = "解包引擎中…";
-    const buf = await (await fetch("mahjong.zip?v=e582-27682c28")).arrayBuffer();
+    const buf = await (await fetch("mahjong.zip?v=e6fd-ad5577b6")).arrayBuffer();
     pyodide.unpackArchive(new Uint8Array(buf), "zip");
     pyodide.runPython(`
 import sys, json
@@ -265,6 +280,10 @@ function tileFace(t){ // Unicode 牌面：条 0x1F010，饼 0x1F019，万 0x1F00
   return String.fromCodePoint(base + (t % 9));
 }
 function tileName(t){ return TILE_STR[t]; }
+function tileDiv(t, cls){ // 彩色牌面：条绿/饼蓝/万红
+  const s = Math.floor(t / 9), r = t % 9;
+  return `<span class="tilef ${cls || ""} su${s}"><b>${RANKS[r]}</b><i>${SUITS[s]}</i></span>`;
+}
 function expectedIdle(){ // 含副露应持：13+杠−3碰−4杠（引擎口径，加杠由 gang 计）
   const p = myMelds.filter(m => m.kind === "peng").length;
   const g = myMelds.length - p;
@@ -285,7 +304,7 @@ function visibleCnt(t){ // 全场已见张数（估牌山剩余用）
 function pBtn(t, onclick, extra){
   const b = document.createElement("button");
   b.className = "p" + (extra || "");
-  b.textContent = tileFace(t);
+  b.innerHTML = tileDiv(t);
   b.title = tileName(t);
   if (onclick) b.onclick = onclick;
   return b;
@@ -399,7 +418,8 @@ function renderMySeat(){
   head.appendChild(clr);
   seat.appendChild(head);
   // 手牌
-  const hz = zone("手牌（点我移除）");
+  const hz = zone("手牌（点我移除/拖到牌河=打出）");
+  hz.dataset.drop = "hand";
   const ht = document.createElement("div");
   ht.className = "tiles"; ht.id = "myhand";
   hz.appendChild(ht);
@@ -417,9 +437,14 @@ function renderMySeat(){
   seat.appendChild(mz);
   // 牌河
   const rz = zone("牌河", undoClr(() => { myRiver.pop(); renderSeats(); }, () => { myRiver = []; renderSeats(); }));
+  rz.dataset.drop = "myriver";
   const rt = document.createElement("div");
   rt.className = "tiles";
-  myRiver.forEach((t, j) => rt.appendChild(pBtn(t, () => { myRiver.splice(j, 1); renderSeats(); })));
+  myRiver.forEach((t, j) => {
+    const el = pBtn(t, () => { myRiver.splice(j, 1); renderSeats(); });
+    bindDrag(el, t, "myriver");
+    rt.appendChild(el);
+  });
   rz.appendChild(rt);
   seat.appendChild(rz);
   return seat;
@@ -428,13 +453,18 @@ function renderMySeat(){
 function renderSeats(){
   const box = document.getElementById("seats");
   box.innerHTML = "";
-  box.appendChild(renderOppSeat(0));
-  box.appendChild(renderOppSeat(1));
-  box.appendChild(renderOppSeat(2));
+  // 逆时针座位循环：我 → 下家 → 对家 → 上家
   box.appendChild(renderMySeat());
+  box.appendChild(renderOppSeat(1));
+  box.appendChild(renderOppSeat(0));
+  box.appendChild(renderOppSeat(2));
   // 我的手牌 + 计数
   const ht = document.getElementById("myhand");
-  hand.forEach((t, i) => ht.appendChild(pBtn(t, () => { hand.splice(i, 1); renderSeats(); })));
+  hand.forEach((t, i) => {
+    const el = pBtn(t, () => { hand.splice(i, 1); renderSeats(); });
+    bindDrag(el, t, "hand");
+    ht.appendChild(el);
+  });
   const idle = expectedIdle();
   document.getElementById("mycnt").textContent = `手牌 ${hand.length} 张（应 ${idle} 或 ${idle + 1}）`;
   renderBeliefs();
@@ -462,9 +492,9 @@ function renderBeliefs(){
         const t = s * 9 + r;
         const e = marg[t];
         const cell = document.createElement("div");
-        cell.className = "bg-cell" + (e < 0.02 ? " na" : "");
+        cell.className = "bg-cell tilef" + (e < 0.02 ? " na" : "") + " su" + s;
         cell.style.background = e < 0.02 ? "" : `rgba(76,120,168,${Math.min(1, 0.18 + e / 4 * 0.82)})`;
-        cell.textContent = tileFace(t);
+        cell.innerHTML = `<b>${RANKS[r]}</b><i>${SUITS[s]}</i>`;
         cell.title = `${tileName(t)} 期望 ${e.toFixed(2)} 张`;
         const es = document.createElement("span"); es.className = "e"; es.textContent = e.toFixed(1);
         cell.appendChild(es);
@@ -502,14 +532,75 @@ function renderPalette(){
       const t = s * 9 + r;
       const left = 4 - visibleCnt(t);
       const b = document.createElement("button");
-      b.className = "tp" + (left <= 0 ? " zero" : "") + (hot.has(t) ? " hot" : "") + (cut.has(t) ? " cut" : "") + dg(t);
+      b.className = "tp tilef" + (left <= 0 ? " zero" : "") + (hot.has(t) ? " hot" : "") + (cut.has(t) ? " cut" : "") + dg(t) + " su" + s;
       b.dataset.tile = t;
-      b.innerHTML = `${tileFace(t)}<span class="cnt">${left}</span>`;
+      b.innerHTML = `<b>${RANKS[r]}</b><i>${SUITS[s]}</i><span class="cnt">${left}</span>`;
       b.title = `${tileName(t)} 余 ${left}` + (lastDanger ? ` · 危险度 ${(lastDanger.tiles[t] * 100).toFixed(0)}%` : "");
       b.onclick = () => tapTile(t);
       row.appendChild(b);
     }
     box.appendChild(row);
+  }
+}
+
+// ---------- 拖拽（pointer events：手牌↔牌河；对局模式=打出） ----------
+const DRAG = {t: null, from: null, el: null, g: null, x0: 0, y0: 0, moved: false, over: null, lastEnd: 0};
+
+function bindDrag(el, t, from){
+  el.addEventListener("pointerdown", (e) => {
+    DRAG.t = t; DRAG.from = from; DRAG.el = el;
+    DRAG.x0 = e.clientX; DRAG.y0 = e.clientY; DRAG.moved = false;
+    try { el.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (DRAG.el !== el) return;
+    if (!DRAG.moved && Math.hypot(e.clientX - DRAG.x0, e.clientY - DRAG.y0) > 8){
+      DRAG.moved = true;
+      const g = document.createElement("div");
+      g.id = "dragghost";
+      g.innerHTML = tileDiv(t);
+      document.body.appendChild(g);
+      DRAG.g = g;
+    }
+    if (DRAG.moved && DRAG.g){
+      DRAG.g.style.left = (e.clientX - 16) + "px";
+      DRAG.g.style.top = (e.clientY - 22) + "px";
+      document.querySelectorAll("[data-drop].dragover").forEach(x => x.classList.remove("dragover"));
+      DRAG.over = null;
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      const z = under && under.closest ? under.closest("[data-drop]") : null;
+      if (z){ z.classList.add("dragover"); DRAG.over = z.dataset.drop; }
+    }
+  });
+  const end = () => {
+    if (DRAG.el !== el) return;
+    const moved = DRAG.moved, zone = DRAG.over;
+    if (DRAG.g) DRAG.g.remove();
+    document.querySelectorAll("[data-drop].dragover").forEach(x => x.classList.remove("dragover"));
+    DRAG.el = null; DRAG.g = null; DRAG.over = null; DRAG.moved = false;
+    if (moved){ DRAG.lastEnd = performance.now(); if (zone) handleDrop(zone, t, from); }
+  };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+}
+document.addEventListener("click", (e) => { // 拖完后抑制源元素上的补偿 click
+  if (performance.now() - DRAG.lastEnd < 300){ e.stopPropagation(); e.preventDefault(); }
+}, true);
+
+function handleDrop(zone, t, from){
+  if (game){  // 对局模式：拖向牌河 = 我出（进动作流水）
+    if (zone === "myriver" && from === "hand"){
+      game.actions.push({op: "me_discard", tile: t});
+      renderGameBar(); recSync();
+    }
+    return;
+  }
+  if (zone === "myriver" && from === "hand"){
+    const i = hand.indexOf(t);
+    if (i >= 0){ hand.splice(i, 1); myRiver.push(t); renderSeats(); scheduleAna(); scheduleInfer(); }
+  } else if (zone === "hand" && from === "myriver"){
+    const i = myRiver.indexOf(t);
+    if (i >= 0){ myRiver.splice(i, 1); hand.push(t); hand.sort((a, b) => a - b); renderSeats(); scheduleAna(); scheduleInfer(); }
   }
 }
 
@@ -603,12 +694,12 @@ function updateBanner(){
     const hot = lastDanger.opponents.map((o, i) => o.tenpai ? OPP_CN[i] : null).filter(Boolean);
     if (hot.length){
       const waitsTxt = lastDanger.opponents
-        .map((o, i) => o.tenpai && o.waits.length ? `${OPP_CN[i]}听${o.waits.map(w => tileFace(w)).join("")}` : "")
+        .map((o, i) => o.tenpai && o.waits.length ? `${OPP_CN[i]}听${o.waits.map(w => tileDiv(w, "mini")).join("")}` : "")
         .filter(Boolean).join(" · ");
       warn = ` ⚠${hot.join("/")}疑似听牌（${waitsTxt}） `;
     }
   }
-  document.getElementById("rec").textContent = warn ? warn + "｜ " + lastRecText : lastRecText;
+  document.getElementById("rec").innerHTML = warn ? warn + "｜ " + lastRecText : lastRecText;
 }
 
 async function callAnalyze(payload){
@@ -657,7 +748,7 @@ async function runAna(){
 
 function showAna(data, ms){
   const r = data.recommend;
-  const dtxt = r.discard != null ? ` · 切 ${tileFace(r.discard)}${tileName(r.discard)}` : "";
+  const dtxt = r.discard != null ? ` · 切 ${tileDiv(r.discard, "mini")}${tileName(r.discard)}` : "";
   flashRec(`推荐 ${PLAN_CN[r.plan]}（EV ${r.ev.toFixed(2)}）${dtxt}`);
   document.getElementById("lat").textContent =
     `结构：对子×${data.features.n_pairs} 强门 ${data.features.n_max} 张 · 定缺${SUITS[data.que]} · ${ms.toFixed(0)}ms`;
@@ -668,7 +759,7 @@ function showAna(data, ms){
     const best = p.plan === r.plan;
     const card = document.createElement("div");
     card.className = "plan-card" + (best ? " best" : "");
-    const d = p.discard != null ? `切 ${tileFace(p.discard)}${tileName(p.discard)}` : `向听 ${p.shanten}`;
+    const d = p.discard != null ? `切 ${tileDiv(p.discard, "mini")}${tileName(p.discard)}` : `向听 ${p.shanten}`;
     card.innerHTML = `
       <div class="plan-head">
         <span style="color:${PLAN_CSS[p.plan]}">${PLAN_CN[p.plan]}${best ? " ★" : ""}</span>
@@ -695,7 +786,7 @@ function rankBox(title, rows, tileOf, color, extra){
     const row = document.createElement("div");
     row.className = "rank-row";
     const t = tileOf(x);
-    row.innerHTML = `<span>${tileFace(t)}${tileName(t)}</span>
+    row.innerHTML = `<span>${tileDiv(t, "mini")}${tileName(t)}</span>
       <span class="barw"><span class="barf" style="display:block;width:${Math.max(2, x.ev / maxEv * 100)}%;background:${color}"></span></span>
       <span>${x.ev.toFixed(2)}${extra ? extra(x) : ""}</span>`;
     w.appendChild(row);
@@ -725,7 +816,7 @@ async function runInfer(){
       if (m){
         const info = lastDanger && lastDanger.opponents[i];
         m.innerHTML = info && info.tenpai
-          ? `<span class="tenpai-badge">⚠ 疑似听牌 ${(info.conf * 100).toFixed(0)}% ｜ 听 ${info.waits.map(w => tileFace(w)).join(" ")}</span> ｜ neff ${b.neff}`
+          ? `<span class="tenpai-badge">⚠ 疑似听牌 ${(info.conf * 100).toFixed(0)}% ｜ 听 ${info.waits.map(w => tileDiv(w, "mini")).join(" ")}</span> ｜ neff ${b.neff}`
           : `有效样本 ${b.neff} ｜ MAP权重 ${b.map_weight}`;
       }
     });
