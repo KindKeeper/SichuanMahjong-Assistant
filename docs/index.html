@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 <title>川麻助手 v0.3 · PWA</title>
 <style>
 :root { --n:#4c78a8; --d:#f58518; --q:#54a24b; --f:#b279a2; --bg:#eef0f3; --line:#d8dce2; }
@@ -119,7 +118,10 @@ h1 { font-size: 1.05rem; margin: 6px 4px; }
 <body>
 
 <div id="loading"><div class="spin"></div>
-  <div>正在加载川麻引擎（首次约几秒）…</div><div id="loadmsg" class="meta">初始化 Pyodide…</div>
+  <div>正在加载川麻助手（首次约几秒）…</div>
+  <div id="loadmsg" class="meta">准备中…</div>
+  <div id="loadtip" class="meta"></div>
+  <button id="retrybtn" style="display:none;border:1px solid #4c78a8;color:#4c78a8;border-radius:8px;padding:8px 22px;background:#fff">重试</button>
 </div>
 
 <div id="banner"><div class="in">
@@ -184,12 +186,39 @@ h1 { font-size: 1.05rem; margin: 6px 4px; }
 
 <script>
 // ---- Pyodide 胶水（由 make_pwa.py 注入；static 源不含本段） ----
+// 多镜像动态加载：cdn.jsdelivr 在国内网络间歇不可达，自动降级 fastly/gcore 镜像；
+// 全部失败给出明确提示与重试按钮。
+const PYODIDE_MIRRORS = [
+  "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js",
+  "https://fastly.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js",
+  "https://gcore.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js",
+];
 let pyodideReady = false;
+
+function _loadScript(src, timeoutMs){
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    const timer = setTimeout(() => { s.remove(); reject(new Error("timeout")); }, timeoutMs);
+    s.src = src;
+    s.onload = () => { clearTimeout(timer); resolve(); };
+    s.onerror = () => { clearTimeout(timer); s.remove(); reject(new Error("load error")); };
+    document.head.appendChild(s);
+  });
+}
+
 async function boot(){
+  const msg = (t) => { document.getElementById("loadmsg").textContent = t; };
   try {
+    let loaded = false;
+    for (const m of PYODIDE_MIRRORS){
+      msg("加载引擎运行时… " + m.split("/")[2]);
+      try { await _loadScript(m, 20000); loaded = true; break; } catch (e) {}
+    }
+    if (!loaded) throw new Error("所有镜像均不可达（cdn/fastly/gcore.jsdelivr.net）");
+    msg("初始化 Pyodide（首次约几秒）…");
     const pyodide = await loadPyodide();
     window._py = pyodide;
-    document.getElementById("loadmsg").textContent = "解包引擎中…";
+    msg("解包引擎中…");
     const buf = await (await fetch("mahjong.zip?v=e6fd-ad5577b6")).arrayBuffer();
     pyodide.unpackArchive(new Uint8Array(buf), "zip");
     pyodide.runPython(`
@@ -246,7 +275,15 @@ def rec_export_json(s):
     pyodideReady = true;
     document.getElementById("loading").style.display = "none";
   } catch (e) {
-    document.getElementById("loadmsg").textContent = "加载失败：" + e.message + "（请检查网络后刷新）";
+    const msg = document.getElementById("loadmsg");
+    msg.textContent = "加载失败：" + e.message;
+    const tip = document.getElementById("loadtip");
+    if (tip) tip.textContent = "提示：引擎运行时托管在 jsdelivr CDN，国内网络可能间歇不可达——切换网络（如 WiFi↔流量）后点下方重试。";
+    const rb = document.getElementById("retrybtn");
+    if (rb){
+      rb.style.display = "inline-block";
+      rb.onclick = () => { rb.style.display = "none"; boot(); };
+    }
   }
 }
 </script>
