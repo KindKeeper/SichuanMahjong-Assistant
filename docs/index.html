@@ -212,12 +212,17 @@ async function boot(){
     let loaded = false;
     for (const m of PYODIDE_MIRRORS){
       msg("加载引擎运行时… " + m.split("/")[2]);
-      try { await _loadScript(m, 20000); loaded = true; break; } catch (e) {}
+      try { await _loadScript(m, 20000); } catch (e) { continue; }
+      msg("初始化 Pyodide… " + m.split("/")[2]);
+      try {
+        const timer = new Promise((_, rej) => setTimeout(() => rej(new Error("Pyodide 初始化超时")), 30000));
+        window._py = await Promise.race([loadPyodide(), timer]);
+        loaded = true;
+        break;
+      } catch (e) { /* 初始化卡住（WASM 拉取停滞）→ 下一镜像 */ }
     }
-    if (!loaded) throw new Error("所有镜像均不可达（cdn/fastly/gcore.jsdelivr.net）");
-    msg("初始化 Pyodide（首次约几秒）…");
-    const pyodide = await loadPyodide();
-    window._py = pyodide;
+    if (!loaded) throw new Error("所有镜像均不可达或初始化超时（cdn/fastly/gcore.jsdelivr.net）");
+    const pyodide = window._py;
     msg("解包引擎中…");
     const buf = await (await fetch("mahjong.zip?v=e6fd-ad5577b6")).arrayBuffer();
     pyodide.unpackArchive(new Uint8Array(buf), "zip");
