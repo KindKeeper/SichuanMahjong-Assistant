@@ -65,6 +65,12 @@ body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 .tp.zero { opacity: .32; }
 .tp.hot { border-color: #54a24b; box-shadow: 0 0 0 2px rgba(84,162,75,.4); }
 .tp.cut { border-color: #e45756; box-shadow: 0 0 0 2px rgba(228,87,86,.4); }
+/* 危险度五级（defense.py 聚合值）：蓝 <5% · 黄 5-10% · 红 10-15% · 深红 >15% */
+.tp.dg1 { border-bottom: 4px solid #7aa5d8; }
+.tp.dg2 { border-bottom: 4px solid #e8c34a; }
+.tp.dg3 { border-bottom: 4px solid #e45756; }
+.tp.dg4 { border-bottom: 4px solid #8b1a1a; }
+.tenpai-badge { color: #b3382f; font-weight: 700; font-size: .78rem; }
 
 /* ---- 分析详情 ---- */
 details.sec { background: #fff; border-radius: 10px; margin: 8px 0; border: 1px solid var(--line); }
@@ -119,6 +125,7 @@ h1 { font-size: 1.05rem; margin: 6px 4px; }
       </div>
       <div id="plans"></div>
       <div class="meta">口径：v1.9 引擎（碰杠开 / 官方累加计分 / 哑对手）· EV=每手期望分（和牌+杠租）</div>
+      <div class="meta">牌盘底边=危险度（基于对手 MAP 听牌估计）：蓝 &lt;5% · 黄 5-10% · 红 10-15% · 深红 &gt;15%；现物/筋已折算</div>
     </div>
   </details>
 </div>
@@ -149,7 +156,7 @@ async function boot(){
     const pyodide = await loadPyodide();
     window._py = pyodide;
     document.getElementById("loadmsg").textContent = "解包引擎中…";
-    const buf = await (await fetch("mahjong.zip?v=ce11-4f9ebe45")).arrayBuffer();
+    const buf = await (await fetch("mahjong.zip?v=d4e4-7f347e9b")).arrayBuffer();
     pyodide.unpackArchive(new Uint8Array(buf), "zip");
     pyodide.runPython(`
 import sys, json
@@ -212,6 +219,8 @@ let opps = [                   // 三家：牌河/副露手动，手牌由信念
 let myQue = null;
 let mode = "hand";             // hand | myriver | or0..2 | meld
 let lastAna = null;
+let lastDanger = null;         // 最近一次读牌的 danger 字段
+let lastRecText = "录入手牌后自动分析…";
 
 function tileFace(t){ // Unicode 牌面：条 0x1F010，饼 0x1F019，万 0x1F007
   const base = t < 9 ? 0x1F010 : t < 18 ? 0x1F019 : 0x1F007;
@@ -440,6 +449,11 @@ function renderPalette(){
     if (lastAna.draw_rank) lastAna.draw_rank.slice(0, 3).forEach(x => hot.add(x.draw));
     if (lastAna.recommend && lastAna.recommend.discard != null) cut.add(lastAna.recommend.discard);
   }
+  const dg = (t) => {
+    if (!lastDanger) return "";
+    const d = lastDanger.tiles[t];
+    return d > 0.15 ? " dg4" : d > 0.10 ? " dg3" : d > 0.05 ? " dg2" : d > 0.02 ? " dg1" : "";
+  };
   for (let s = 0; s < 3; s++){
     const row = document.createElement("div");
     row.className = "prow";
@@ -450,10 +464,10 @@ function renderPalette(){
       const t = s * 9 + r;
       const left = 4 - visibleCnt(t);
       const b = document.createElement("button");
-      b.className = "tp" + (left <= 0 ? " zero" : "") + (hot.has(t) ? " hot" : "") + (cut.has(t) ? " cut" : "");
+      b.className = "tp" + (left <= 0 ? " zero" : "") + (hot.has(t) ? " hot" : "") + (cut.has(t) ? " cut" : "") + dg(t);
       b.dataset.tile = t;
       b.innerHTML = `${tileFace(t)}<span class="cnt">${left}</span>`;
-      b.title = `${tileName(t)} 余 ${left}`;
+      b.title = `${tileName(t)} 余 ${left}` + (lastDanger ? ` · 危险度 ${(lastDanger.tiles[t] * 100).toFixed(0)}%` : "");
       b.onclick = () => tapTile(t);
       row.appendChild(b);
     }
@@ -506,8 +520,7 @@ function tapTile(t){
 function clearAll(){
   hand = []; myMelds = []; myRiver = [];
   opps.forEach(o => { o.river = []; o.melds = []; o.belief = null; });
-  lastAna = null;
-  document.getElementById("rec").textContent = "录入手牌后自动分析…";
+  lastAna = null; lastDanger = null;
   document.getElementById("plans").innerHTML = "";
   renderSeats();
 }
@@ -541,7 +554,23 @@ function handValid(){
   const idle = expectedIdle();
   return hand.length === idle || hand.length === idle + 1;
 }
-function flashRec(msg){ document.getElementById("rec").textContent = msg; }
+function flashRec(msg){
+  lastRecText = msg;
+  updateBanner();
+}
+function updateBanner(){
+  let warn = "";
+  if (lastDanger){
+    const hot = lastDanger.opponents.map((o, i) => o.tenpai ? OPP_CN[i] : null).filter(Boolean);
+    if (hot.length){
+      const waitsTxt = lastDanger.opponents
+        .map((o, i) => o.tenpai && o.waits.length ? `${OPP_CN[i]}听${o.waits.map(w => tileFace(w)).join("")}` : "")
+        .filter(Boolean).join(" · ");
+      warn = ` ⚠${hot.join("/")}疑似听牌（${waitsTxt}） `;
+    }
+  }
+  document.getElementById("rec").textContent = warn ? warn + "｜ " + lastRecText : lastRecText;
+}
 
 async function callAnalyze(payload){
   if (window._analyzeJson) return window._analyzeJson(payload);
@@ -649,12 +678,20 @@ async function runInfer(){
       k: +document.getElementById("ki").value,
     });
     if (data.error){ document.getElementById("status").textContent = "读牌失败：" + data.error; return; }
+    lastDanger = data.danger || null;
     data.opponents.forEach((b, i) => {
       opps[i].belief = b;
       const m = document.getElementById("ometa" + i);
-      if (m) m.textContent = `有效样本 ${b.neff} ｜ MAP权重 ${b.map_weight}`;
+      if (m){
+        const info = lastDanger && lastDanger.opponents[i];
+        m.innerHTML = info && info.tenpai
+          ? `<span class="tenpai-badge">⚠ 疑似听牌 ${(info.conf * 100).toFixed(0)}% ｜ 听 ${info.waits.map(w => tileFace(w)).join(" ")}</span> ｜ neff ${b.neff}`
+          : `有效样本 ${b.neff} ｜ MAP权重 ${b.map_weight}`;
+      }
     });
     renderBeliefs();
+    renderPalette();
+    updateBanner();
     document.getElementById("status").textContent = "读牌✓ " + new Date().toLocaleTimeString();
   } catch (e) {
     document.getElementById("status").textContent = "读牌失败：" + e.message;
