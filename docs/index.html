@@ -109,6 +109,23 @@ h1 { font-size: 1.05rem; margin: 6px 4px; }
 
 <div class="wrap">
   <h1 style="display:none">川麻助手</h1>
+
+  <details class="sec" id="gameSec">
+    <summary>🎮 对局记录 <span class="meta" id="gstat">动作流水录入 → 一键导出 M 记录复盘</span></summary>
+    <div class="sec-body">
+      <div class="row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0">
+        <label class="meta">庄家
+          <select id="gdealer"><option value="0">我</option><option value="1">下家</option><option value="2">对家</option><option value="3">上家</option></select>
+        </label>
+        <button id="gstart" class="mini-undo" style="border:1px solid var(--line);border-radius:7px;padding:7px 12px">新开一局（用当前 13 张手牌）</button>
+        <button id="gexit" class="mini-undo" style="border:1px solid var(--line);border-radius:7px;padding:7px 12px">退出对局</button>
+      </div>
+      <div class="meta">开局后底部牌盘变为动作录入：我摸/我出/各家出；碰杠胡用下方按钮。对手定缺取各家卡上的定缺选择。</div>
+      <div id="gbar" style="margin:8px 0"></div>
+      <div id="gout"></div>
+    </div>
+  </details>
+
   <div id="seats"></div>
 
   <details class="sec" id="anaSec">
@@ -185,9 +202,30 @@ def infer_json(s):
                        k=int(d.get("k", 300)),
                        my_river=[int(t) for t in d.get("my_river", [])])
     return json.dumps(r, ensure_ascii=False)
+
+from mahjong.recorder import RecorderSession as _RS
+
+def _rec_session(d):
+    sess = _RS([int(t) for t in d["my_tiles"]], int(d["my_que"]), int(d.get("dealer", 0)))
+    for a in d.get("actions", []):
+        sess.act(a)
+    return sess
+
+def rec_state_json(s):
+    d = json.loads(s)
+    return json.dumps({"state": _rec_session(d).state()}, ensure_ascii=False)
+
+def rec_export_json(s):
+    d = json.loads(s)
+    try:
+        return json.dumps({"record": _rec_session(d).export(k_infer=int(d.get("k", 300)))}, ensure_ascii=False)
+    except ValueError as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
 `);
     window._analyzeJson = (s) => JSON.parse(pyodide.globals.get("analyze_json")(JSON.stringify(s)));
     window._inferJson = (s) => JSON.parse(pyodide.globals.get("infer_json")(JSON.stringify(s)));
+    window._recStateJson = (s) => JSON.parse(pyodide.globals.get("rec_state_json")(JSON.stringify(s)));
+    window._recExportJson = (s) => JSON.parse(pyodide.globals.get("rec_export_json")(JSON.stringify(s)));
     pyodideReady = true;
     document.getElementById("loading").style.display = "none";
   } catch (e) {
@@ -482,6 +520,7 @@ function setMode(m){
   document.getElementById("meldCfg").classList.toggle("show", m === "meld");
 }
 function tapTile(t){
+  if (game && gameTap(t)) return;
   if (mode === "hand"){
     const idle = expectedIdle();
     if (hand.length >= idle + 1){ flashRec(`手牌已满 ${idle + 1} 张：点手牌区一张打出/移除后再录`); return; }
@@ -698,9 +737,238 @@ async function runInfer(){
   }
 }
 
+// ---------- 对局记录（A1：动作流水 → RecorderSession → M 记录） ----------
+// 会话座位：0=我，1=下家，2=对家，3=上家（轮转顺序）；显示桶 opps[对,下,上]
+const OPP_OF_SEAT = {1: 1, 2: 0, 3: 2};
+const SEAT_OF_OPP = {0: 2, 1: 1, 2: 3};
+let game = null; // {dealer, actions, st, gmode, pending, my0, myQue}
+
+async function callRec(payload, which){
+  const path = "/api/rec/" + which;
+  if (which === "state" && window._recStateJson) return window._recStateJson(payload);
+  if (which === "export" && window._recExportJson) return window._recExportJson(payload);
+  const resp = await fetch(path, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)});
+  return resp.json();
+}
+
+function startGame(){
+  if (game) return;
+  if (hand.length !== 13){ flashRec("新开一局需先录好开局 13 张手牌（我·手牌模式）"); return; }
+  if (myQue === null){ flashRec("请先在“我”卡上选定缺"); return; }
+  const my0 = hand.slice();
+  const actions = [];
+  // 对手定缺登记（取各家卡上的选择；未选=未知，会话允许 None）
+  for (let i = 0; i < 3; i++){
+    if (opps[i].que !== null) actions.push({op: "que", seat: SEAT_OF_OPP[i], que: opps[i].que});
+  }
+  game = {dealer: +document.getElementById("gdealer").value, actions, st: null,
+          gmode: "medraw", pending: null, my0, myQue};
+  document.getElementById("gameSec").open = true;
+  document.getElementById("modes").style.display = "none";
+  document.getElementById("meldCfg").classList.remove("show");
+  flashRec("对局开始：按轮转录入（我摸→我出→各家出…）");
+  renderGameBar();
+  recSync();
+}
+function exitGame(){
+  game = null;
+  document.getElementById("gbar").innerHTML = "";
+  document.getElementById("gout").innerHTML = "";
+  document.getElementById("modes").style.display = "";
+  renderPalette();
+}
+
+function lastDiscardTile(){
+  for (let i = game.actions.length - 1; i >= 0; i--){
+    const a = game.actions[i];
+    if (a.op === "me_discard" || a.op === "opp_discard") return a.tile;
+  }
+  return null;
+}
+
+function gameTap(t){
+  if (!game) return false;
+  if (game.pending){
+    const p = game.pending; game.pending = null;
+    if (p.kind === "angang") game.actions.push({op: "call", seat: 0, tile: t, kind: "angang", kong: t});
+    else if (p.kind === "jiagang") game.actions.push({op: "call", seat: 0, tile: t, kind: "jiagang", kong: t});
+    else if (p.kind === "zimo") game.actions.push({op: "win", seat: p.seat, tile: t, mode: "zimo"});
+  } else if (game.gmode === "medraw"){
+    game.actions.push({op: "me_draw", tile: t});
+  } else if (game.gmode === "mdiscard"){
+    game.actions.push({op: "me_discard", tile: t});
+  } else {
+    game.actions.push({op: "opp_discard", seat: SEAT_OF_OPP[game.gmode.slice(2)], tile: t});
+  }
+  renderGameBar();
+  recSync();
+  return true;
+}
+
+function gameAct(kind){
+  const st = game.st;
+  if (kind === "huangzhuang"){
+    game.actions.push({op: "huangzhuang"});
+  } else if (kind === "peng" || kind === "daming"){
+    const seat = +document.getElementById("gcallSeat").value;
+    const t = lastDiscardTile();
+    if (t === null){ flashRec("尚无舍牌可鸣"); return; }
+    game.actions.push({op: "call", seat, tile: t, kind});
+  } else if (kind === "rong"){
+    const seat = +document.getElementById("gcallSeat").value;
+    const t = lastDiscardTile();
+    if (t === null){ flashRec("点炮需有上一张舍牌"); return; }
+    game.actions.push({op: "win", seat, tile: t, mode: "rong"});
+  } else if (kind === "zimo"){
+    game.pending = {kind: "zimo", seat: +document.getElementById("gcallSeat").value};
+  } else if (kind === "angang" || kind === "jiagang"){
+    game.pending = {kind};
+  }
+  renderGameBar();
+  recSync();
+}
+
+let recTimer = null;
+function recSync(){
+  clearTimeout(recTimer);
+  recTimer = setTimeout(recSend, 250);
+}
+async function recSend(){
+  if (!game) return;
+  const payload = {my_tiles: game.my0, my_que: game.myQue, dealer: game.dealer, actions: game.actions};
+  try {
+    const data = await callRec(payload, "state");
+    if (data.error){
+      const bad = game.actions.pop(); // 回滚非法动作
+      renderGameBar();
+      flashRec(`记录拒绝：${data.error}`);
+      return;
+    }
+    game.st = data.state;
+    syncFromSession();
+    renderSeats();
+    renderGameBar();
+    scheduleAna();
+    scheduleInfer();
+  } catch (e) {
+    flashRec("记录同步失败：" + e.message);
+  }
+}
+
+function expandTiles(counts){
+  const out = [];
+  for (let t = 0; t < 27; t++) for (let n = 0; n < counts[t]; n++) out.push(t);
+  return out;
+}
+function syncFromSession(){
+  const st = game.st;
+  hand = expandTiles(st.my_hand);
+  myMelds = st.my_melds.map(m => ({kind: m[0], tile: m[1]}));
+  myRiver = Array.from(st.rivers[0]);
+  for (let i = 0; i < 3; i++){
+    const seat = SEAT_OF_OPP[i];
+    opps[i].river = Array.from(st.rivers[seat]);
+    opps[i].melds = st.melds[seat].map(m => ({kind: m[0], tile: m[1]}));
+  }
+}
+
+function renderGameBar(){
+  const bar = document.getElementById("gbar");
+  if (!game){ bar.innerHTML = ""; return; }
+  const st = game.st;
+  bar.innerHTML = "";
+  const row1 = document.createElement("div");
+  row1.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;margin:4px 0";
+  const modes = [["medraw", "我摸"], ["mdiscard", "我出"], ["or1", "下出"], ["or0", "对出"], ["or2", "上出"]];
+  modes.forEach(([m, n]) => {
+    const b = document.createElement("button");
+    b.className = "mini-undo";
+    b.style.cssText = "border:1px solid var(--line);border-radius:7px;padding:7px 10px" + (game.gmode === m ? ";background:#4c78a8;color:#fff" : "");
+    b.textContent = n;
+    b.onclick = () => { game.gmode = m; game.pending = null; renderGameBar(); };
+    row1.appendChild(b);
+  });
+  bar.appendChild(row1);
+  // 动作按钮行
+  const row2 = document.createElement("div");
+  row2.style.cssText = "display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin:4px 0";
+  const seatSel = document.createElement("select");
+  seatSel.id = "gcallSeat";
+  [["0", "我"], ["1", "下家"], ["2", "对家"], ["3", "上家"]].forEach(([v, n]) => {
+    const o = document.createElement("option"); o.value = v; o.textContent = n; seatSel.appendChild(o);
+  });
+  row2.appendChild(seatSel);
+  const acts = [["peng", "碰"], ["daming", "明杠"], ["angang", "暗杠"], ["jiagang", "加杠"], ["rong", "点炮胡"], ["zimo", "自摸"], ["huangzhuang", "荒庄"]];
+  const sg = st ? st.suggestions : {};
+  acts.forEach(([k, n]) => {
+    const b = document.createElement("button");
+    b.className = "mini-undo";
+    const hot = (k === "peng" && sg.can_peng) || (k === "daming" && sg.can_daming)
+      || (k === "rong" && sg.can_rong) || (k === "zimo" && sg.can_zimo)
+      || ((k === "angang") && sg.can_angang && sg.can_angang.length)
+      || ((k === "jiagang") && sg.can_jiagang && sg.can_jiagang.length);
+    b.style.cssText = "border:1px solid var(--line);border-radius:7px;padding:7px 10px" + (hot ? ";border-color:#e45756;box-shadow:0 0 0 2px rgba(228,87,86,.35)" : "");
+    b.textContent = n;
+    b.onclick = () => gameAct(k);
+    row2.appendChild(b);
+  });
+  bar.appendChild(row2);
+  // 状态行
+  const row3 = document.createElement("div");
+  row3.className = "meta";
+  if (st){
+    const turn = st.turn === -1 ? (st.suggestions && Object.keys(st.suggestions).length === 0 && st.done ? "终局" : "响应中")
+      : (st.turn === 0 ? "轮到我" : "轮到" + gameSeatName(st.turn));
+    row3.textContent = `动作 ${game.actions.length} ｜ ${turn} ｜ 余墙 ${st.wall_left}` +
+      (st.done ? " ｜ 本局结束，可导出" : "") +
+      (game.pending ? ` ｜ ⏳ 请选择${{angang: "暗杠", jiagang: "加杠", zimo: "自摸"}[game.pending.kind]}的牌` : "");
+  } else {
+    row3.textContent = "同步中…";
+  }
+  bar.appendChild(row3);
+  // 导出按钮
+  if (st && st.done){
+    const ex = document.createElement("button");
+    ex.className = "mini-undo";
+    ex.style.cssText = "border:1px solid #4c78a8;border-radius:7px;padding:8px 14px;color:#4c78a8;font-weight:700;margin-top:4px";
+    ex.textContent = "📤 导出 M 记录";
+    ex.onclick = recExport;
+    bar.appendChild(ex);
+  }
+}
+function gameSeatName(s){ return s === 0 ? "我" : OPP_CN[OPP_OF_SEAT[s]]; }
+
+async function recExport(){
+  const payload = {my_tiles: game.my0, my_que: game.myQue, dealer: game.dealer, actions: game.actions, k: 300};
+  const out = document.getElementById("gout");
+  out.innerHTML = '<div class="meta">导出中（信念重建三家手牌+回填牌山，可能数秒）…</div>';
+  try {
+    const data = await callRec(payload, "export");
+    if (data.error){ out.innerHTML = `<div class="meta" style="color:#b3382f">导出失败：${data.error}</div>`; return; }
+    const ta = document.createElement("textarea");
+    ta.readOnly = true;
+    ta.style.cssText = "width:100%;height:90px;font-size:.75rem";
+    ta.value = data.record;
+    const cp = document.createElement("button");
+    cp.className = "mini-undo";
+    cp.style.cssText = "border:1px solid var(--line);border-radius:7px;padding:7px 12px;margin-top:4px";
+    cp.textContent = "复制记录";
+    cp.onclick = () => { ta.select(); navigator.clipboard?.writeText(ta.value); cp.textContent = "已复制"; };
+    out.innerHTML = "";
+    out.appendChild(ta);
+    out.appendChild(cp);
+  } catch (e) {
+    out.innerHTML = `<div class="meta" style="color:#b3382f">导出失败：${e.message}</div>`;
+  }
+}
+
 // ---------- 启动 ----------
 document.querySelectorAll("#modes button").forEach(b => b.onclick = () => setMode(b.dataset.m));
 document.getElementById("go").onclick = runAna;
+document.getElementById("gstart").onclick = startGame;
+document.getElementById("gexit").onclick = exitGame;
 renderSeats();
 setMode(mode);
 scheduleAna();
